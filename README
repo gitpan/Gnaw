@@ -1,0 +1,64 @@
+Gnaw
+
+Gnaw is a perl module which implements full regular expressions and full text parsing grammars using nothing but pure perl code limited to subroutine closures, exception trapping via eval, and basic perl variables such as scalars, hashes, and arrays. It does not use regular expressions. 
+
+You write your grammar in pure perl. There is no intermediate "parser language" that then gets interpreted into something executable. It does not use something like "Parse::RecDescent" to read a grammar as a text file and convert it into something executable. You write the grammar in pure, raw, perl code.
+
+When you do a "use Gnaw", the Gnaw module will import a number of functions directly into your namespace. Yes, this is completely bad form for normal modules. But this is not a normal module. The imported subroutines include regular expression and parsing equivalents for matching, quantifiers, literals, alternations, character classes, and so on. You build up your grammar by calling these functions. The final call will return a code reference. This code reference is your grammar.
+
+When you dereference that grammar, if it is a "match" grammar (i.e. $string =~ m//) then you pass in the string you want to parse.
+
+	use Gnaw;
+
+	# create the grammar
+	my $grammar = match(lit('hello'));
+
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
+
+Please note that this is a beta release. This is more of a proof of concept than something ready for production code or for massive grammars. The interfaces may change completely in the future. When the interfaces have settled, I will release this as a version 1.0+ module. Until then, please do not use this to develop some gigantic parser when the grammar may have to completely change.
+
+Most importantly, the "commit" function is broken, and fixing it might require major rewrites. I haven't got the solution sorted out just yet. Not sure what will have to change to make it work. So no guarantees on anything when the next version comes out.
+
+INSTALLATION
+
+To install this module, run the following commands:
+
+	perl Makefile.PL
+	make
+	make test
+	make install
+
+SUPPORT AND DOCUMENTATION
+
+After installing, you can find documentation for this module with the
+perldoc command.
+
+    perldoc Gnaw
+
+You can also look for information at:
+
+    RT, CPAN's request tracker
+        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Gnaw
+
+    AnnoCPAN, Annotated CPAN documentation
+        http://annocpan.org/dist/Gnaw
+
+    CPAN Ratings
+        http://cpanratings.perl.org/d/Gnaw
+
+    Search CPAN
+        http://search.cpan.org/dist/Gnaw
+
+
+COPYRIGHT AND LICENCE
+
+Copyright (C) 2008 Greg London
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
+

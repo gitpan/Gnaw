@@ -1,0 +1,20 @@
+Changes
+MANIFEST
+Makefile.PL
+README
+lib/Gnaw.pm
+t/00-load.t
+t/boilerplate.t
+t/command_alternation.t
+t/command_callback.t
+t/command_capture.t
+t/command_commit.t
+t/command_match_lit.t
+t/command_quantifier_capture.t
+t/command_quantifier.t
+t/command_series.t
+t/command_set_n.t
+t/command_set.t
+t/pod-coverage.t
+t/pod.t
+META.yml                                 Module meta-data (added by MakeMaker)

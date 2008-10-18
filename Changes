@@ -1,0 +1,11 @@
+Revision history for Gnaw
+
+0.01    17 Oct 2008/11:15 pm
+        First version, released on an unsuspecting world.
+	Basic grammars can be created and executed.
+	The "commit" function is busted, though, and
+	large chunks of the module may need to be rewritten
+	to fix it. All the other functions seem to be doing 
+	their job. Well, except for set_n, which is also
+	broken, but fixing it probably won't require a massive
+	module-wide rewrite.
