@@ -14,3 +14,9 @@ added a package declaration.
 Mainly fixed a lot of problems with POD. Documentation should be readable now using perldoc.
 Also, hacked a fix for set_n. It was hitting end of string, and end of string returns null string, so I added null string to the class of disallowed characters. 
 Lastly, wrapped up the "current" and "restore" pointers into subroutine calls. I think the fix for "commit" problems is to keep track of everyone who points to the linked list of text or the call tree, and any time we delete text or call tree branches, we have to update anyone who is pointing to those locations. 
+
+0.04	18 Oct 2008
+
+changed how grammar commands access the linked list of text. created a concept called a "marker" so that as we delete text in linked list we can update any commands that pointed to old text that is to be deleted.
+
+This should help the "commit" function, but the commit tests are still failing.

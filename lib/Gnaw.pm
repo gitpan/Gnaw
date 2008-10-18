@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -141,12 +141,30 @@ sub __GNAW__NEXT {1;}
 
 sub __GNAW__LETTER {2;}
 
-sub __GNAW__PAYLOAD {4;}
+sub __GNAW__LOCATION_MARKERS {3;}
+
 
 # these two elements never get deleted
 our $__gnaw__head_element    ;
 our $__gnaw__tail_element    ;
-our $__gnaw__current_element ;
+our $__gnaw__current_element ;  
+
+# __gnaw__current_element is a plain pointer into the linked list.
+# any subroutine dealing directly with linked list can
+# reference the current_element variable.
+# all other blocks must user sub calls to 
+# __gnaw__get_current_text_marker
+# __gnaw__restore_old_text_marker
+# to get and restore the current pointer.
+# Those subroutines will create hash refs that
+# will contain a pointer to the current element
+# Those subs will also put a pointer to that hash
+# into the __GNAW__LOCATION_MARKERS part of the linked list.
+# this allows us to keep track of who is pointing to
+# a particular piece of text.
+# When we "commit" and delete some text, we need to 
+# move all the pointers forward, and let the subroutine
+# that's using the pointer know that the pointer was moved.
 
 
 sub __gnaw__initialize_linked_list_to_empty {
@@ -156,10 +174,16 @@ sub __gnaw__initialize_linked_list_to_empty {
 	$__gnaw__head_element->[__GNAW__PREV]	= $__gnaw__tail_element;
 	$__gnaw__head_element->[__GNAW__NEXT]	= $__gnaw__tail_element;
 	$__gnaw__head_element->[__GNAW__LETTER]	= '';
+	$__gnaw__head_element->[__GNAW__LOCATION_MARKERS] = 
+		{debug=>"THIS IS THE HEAD ELEMENT!!!! NO MARKERS HERE"};
+
+
 
 	$__gnaw__tail_element->[__GNAW__PREV]	= $__gnaw__head_element;
 	$__gnaw__tail_element->[__GNAW__NEXT]	= $__gnaw__head_element;
 	$__gnaw__tail_element->[__GNAW__LETTER]	= '';
+	$__gnaw__head_element->[__GNAW__LOCATION_MARKERS] = 
+		{debug=>"THIS IS THE TAIL ELEMENT!!!! NO MARKERS HERE"};
 
 	$__gnaw__current_element  = $__gnaw__head_element;
 }
@@ -179,6 +203,9 @@ sub __gnaw__dump_linked_list {
 		my $letter = $this->[__GNAW__LETTER];
 		print "letter is '$letter'";
 
+		if($this eq $__gnaw__current_element) {
+			print " < current_element ";
+		}
 
 		print "\n";
 		$this = $this->[__GNAW__NEXT];
@@ -198,6 +225,7 @@ sub __gnaw__insert_element_in_linked_list_after_this {
 	my $newelement = [];
 
 	$newelement->[__GNAW__LETTER]=$letter_to_insert;
+	$newelement->[__GNAW__LOCATION_MARKERS]={};
 
 	my $third_element = $ptr_to_this_element->[__GNAW__NEXT];
 
@@ -219,17 +247,142 @@ sub __gnaw__insert_element_in_linked_list_at_end {
 }
 
 
+# text markers, an explanation.
+#
+# the text is stored in a linked list.
+# the __gnaw__current_element variable points to whatever is
+# the current element in the linked list that we are working on now.
+#
+# However, parsing commands need more intelligent markers than
+# a simple reference to an element in the linked list.
+# The problem is to deal with what happens when a command gets
+# a marker to some element, and then at some later time, that
+# element is deleted before the parsing command could deal with
+# the marker.
+#
+# worst case example, the "capture" command gets a marker at the
+# start of capture. It then executes any sub-grammar. On successful
+# completion, the "capture" command will then get the current marker,
+# and then get the text in between the two markers.
+#
+# if the sub-grammar does a "commit", then the elements of text in
+# the linked list will be deleted, and the first capture pointer will
+# point to some unknown value in the heap.
+#
+# Therefore, we need to implement smart location markers.
+# Any grammar command that needs a marker will call a subroutine
+# to get the marker. The subroutine willl create a marker and return
+# it to the caller. It will also put a reference to that marker into
+# the linked list element that it points to. If the grammar performs
+# a commit, the element can be deleted, and all markers can be updated
+# to point to the next element in the linked list which still exists.
+#
+# this will prevent markers pointing to unknown data in the heap.
+#
+# a marker is a hash. currently two keys are defined:
+# pointer_to_text => a pointer to the linked list element
+# original_characters_deleted => a boolean flag set when the text it was pointing to is deleted
+# MARKER_DELETED => this key exists only once the marker has been restored.
+#
+# When the marker has been restored, all the pointers to it are deleted to
+# allow automatic garbage collection. If the user wants to restore the same location,
+# they will need to restore the first marker, then immediately get a new marker of that location.
+#
+# the hash is created on the fly lexically, and no one gets the
+# hash, instead everyone uses references to the hash.
+#
+# The linked list of text contains one index [__GNAW__LOCATION_MARKERS]
+# which contains a hash of markers. The key is the address of the marker
+# stringified to give a unique key. The data is an actual reference to 
+# the hash marker.
+#
+# We use the address of the hash marker as the key so that we can
+# delete individual markers when they are no longer used.
+#
+# The __gnaw__get_current_text_marker subroutines creates
+# this hashref and sets the pointer_to_text to the current location.
+# it then needs to add a pointer to the href into the 
+# linked list of text. This will allow the pointer to move
+# if text is deleted.
+#
+# The restore linkedtext location subroutine takes the hash
+# sets the current pointer to the linked list element indicated
+# in teh hash, and deletes the pointer to the href from the
+# linked list location. Deleting the pointer from the linked
+# list will allow garbage collection and should avoid memory leaks.
+
+sub __gnaw__get_current_text_marker {
+	# create the text marker and initialize it
+	my $markerref = {};
+	$markerref->{pointer_to_text} = $__gnaw__current_element;
+	$markerref->{original_characters_deleted}=0;
+
+	# make sure the current element in linked list of text knows
+	# that the marker we just created is pointing to this element.
+
+	# a. get the hashref for this element that contains the location markers for this element
+	my $pointers_for_this_element = $__gnaw__current_element->[__GNAW__LOCATION_MARKERS];
+
+	# the address of our new marker is the key into the element's hash of location markers
+	my $markeraddress = $markerref.'';
 
 
+	$pointers_for_this_element->{$markeraddress} = $markerref;
 
-sub __gnaw__current_linkedtext_location {
-	$_[0] = $__gnaw__current_element ;	
+	# return the marker
+	$_[0] = $markerref;	
 } 
 
-sub __gnaw__restore_linkedtext_location {
-	$__gnaw__current_element = $_[0]; 
-} 
+sub __gnaw__restore_old_text_marker {
+	my($markerref) = @_;
 
+	if(exists($markerref->{MARKER_DELETED})) {
+		__gnaw__die("tried to __gnaw__restore_old_text_marker with a marker that had already been restored. Need to __gnaw__get_current_text_marker after every restore.");
+	}
+
+	# the marker points to some element in linked list.
+	# set the current_element to whatever the marker points to.
+	$__gnaw__current_element = $markerref->{pointer_to_text};
+
+	__gnaw__unlink_old_marker($markerref);
+}
+
+
+# this deletes the element in the linked list of text that points to the marker.
+# this means that the only thing left pointing to the marker after this call
+# should be the grammar command that got the marker in the first place.
+# once they're done with it, perl should garbage collect the hash.
+sub __gnaw__unlink_old_marker {
+	my($markerref) = @_;
+
+	# the element in the linked list contains a hash of location markers.
+	# we want to go into that hash and delete this marker.
+	# this will allow garbage collection to kick in if needed.
+	# this is also why the user can only restore a marker once.
+
+	my $element_in_list = $markerref->{pointer_to_text};
+
+	# get a reference to the markers for this element
+	my $markers_for_this_element = $element_in_list->[__GNAW__LOCATION_MARKERS];
+
+	# get the address, which we will use as the hash key
+	my $markeraddress = $markerref.'';
+
+	# if it doesn't exist, then something went really wrong somewhere.
+	# either the user munged the href before they tried to do a restore
+	# or I didn't move a pointer in the linked list somewhere.
+	# The location href should always point to an element in the linked list of text,
+	# and that element should always point to the href that points to it.
+	unless(exists($markers_for_this_element->{$markeraddress})) {
+		__gnaw__die("tried to __gnaw__restore_old_text_marker, but somehow the element in the linked list doesn't point to this marker. Marker should point to element, and element should point to marker. Are you experience a memory leak? ");
+	}
+
+	delete($markers_for_this_element->{$markeraddress});
+
+	# now tag the user's href so we can catch if they 
+	# use it again without getting a new marker
+	%{$_[0]} = (MARKER_DELETED=>1);
+} 
 
 sub __gnaw__at_end_of_string {
 	if($__gnaw__current_element eq $__gnaw__tail_element) {
@@ -397,8 +550,9 @@ sub __gnaw__string_showing_user_current_location_in_text {
 }
 
 
-# what if element being deleted is current location or a location 
-# that some other pointer is pointing to?
+# what if element being deleted is __gnaw__current_element or 
+# is a location that some marker is pointing to?
+# need to move all the pointers and markers to the next element in list.
 sub __gnaw__delete_this_element_from_linked_list {
 	my ($element)=@_;
 
@@ -406,10 +560,39 @@ sub __gnaw__delete_this_element_from_linked_list {
 	my $prev_ele = $element->[__GNAW__PREV];
 	my $next_ele = $element->[__GNAW__NEXT];
 
+
+	# if we are deleting the element that the 
+	# $__gnaw__current_element variable is pointing to
+	# then we need to move the $__gnaw__current_element 
+	# variable forward.
+	if($element eq $__gnaw__current_element) {
+		$__gnaw__current_element = $next_ele;
+	}
+
+	# if this element has any location markers pointing to it,
+	# then we need to move all those markers to the next element.
+	my $this_elements_location_markers =  $element->[__GNAW__LOCATION_MARKERS];
+	my $next_elements_location_markers = $next_ele->[__GNAW__LOCATION_MARKERS];
+
+	# take all the markers that point to this element in linked list
+	# and have them point to next element instead.
+	while(my($key, $marker)=each(%$this_elements_location_markers)) {
+		next if($key eq 'debug'); # debug flag. just ignore it.
+
+		$marker->{pointer_to_text}=$next_ele;
+		$marker->{original_characters_deleted}=1; # that's gotta hurt
+
+		# take these markers and add them to the next element's marker hash.
+		# note, next element in list may already have some markers,
+		# so we have to add these one at a time to existing hash.
+		$next_elements_location_markers->{$key}=$marker;
+	}
+
 	$prev_ele->[__GNAW__NEXT] = $next_ele;
 	$next_ele->[__GNAW__PREV] = $prev_ele;
 
-	$element=undef;
+	# empty out the contents of this element in linked list.
+	@$element=undef;
 }
 
 sub __gnaw__delete_linked_list_between_two_pointers {
@@ -421,7 +604,11 @@ sub __gnaw__delete_linked_list_between_two_pointers {
 		$this = $this->[__GNAW__NEXT];
 	}
 
-	while( ($this ne $stop) and  ($this ne $__gnaw__tail_element) ){
+	if($this eq $__gnaw__tail_element) {
+		return;
+	}
+
+	while( defined($this) and ($this ne $stop) and  ($this ne $__gnaw__tail_element) ){
 		__gnaw__delete_this_element_from_linked_list($this);
 		$this = $this->[__GNAW__NEXT];
 	}
@@ -620,7 +807,7 @@ sub __gnaw__match {
 		__gnaw__initialize_call_tree();
 
 		my $position;
-		__gnaw__current_linkedtext_location($position);
+		__gnaw__get_current_text_marker($position);
 
 		my $sub = sub { __gnaw__series(@coderefs) };
 
@@ -629,7 +816,7 @@ sub __gnaw__match {
 			__gnaw__commit();
 			return 1;
 		} else {
-			__gnaw__restore_linkedtext_location($position);
+			__gnaw__restore_old_text_marker($position);
 			__gnaw__move_pointer_forward();
 		}
 	}
@@ -997,8 +1184,7 @@ sub alternation {
 
 
 sub __gnaw__alternation {
-	my $location_start_of_alternation;
-	__gnaw__current_linkedtext_location($location_start_of_alternation);
+	my $text_marker_at_start_of_alternation;
 
 	my $location_of_alternation_on_call_tree;
 
@@ -1007,13 +1193,18 @@ sub __gnaw__alternation {
 	# try each alternate
 	foreach my $alternate (@_) {
 
+		__gnaw__get_current_text_marker($text_marker_at_start_of_alternation);
+
 		# if it works, then return
 		if(__gnaw__try_to_parse($alternate) == 1) {
+			# need to garbage collect the marker
+			__gnaw__unlink_old_marker($text_marker_at_start_of_alternation);
+
 			return;
 		}
 
 		# else go back to where alternation started and try next alternation
-		__gnaw__restore_linkedtext_location($location_start_of_alternation);
+		__gnaw__restore_old_text_marker($text_marker_at_start_of_alternation);
 
 		__gnaw__restore_calltree_location( $location_of_alternation_on_call_tree );
 	}
@@ -1259,14 +1450,15 @@ sub __gnaw__quantifier {
 	for($cnt=1; ($openended or ($cnt<=$try)); $cnt++) {
 
 		# save current location
-		my $location_in_text;
-		__gnaw__current_linkedtext_location($location_in_text);
+		my $text_marker_at_start_of_quantifier_attempt;
+		__gnaw__get_current_text_marker($text_marker_at_start_of_quantifier_attempt);
 		my $location_on_call_tree;
 		__gnaw__current_calltree_location($location_on_call_tree);
 
 
 
 		# try the subroutine
+		# if it failed
 		if(__gnaw__try_to_parse($operation) == 0) {
 
 			# failed, restore call tree to last success
@@ -1294,7 +1486,8 @@ sub __gnaw__quantifier {
 
 			# the number of successes are within acceptable min/max range.
 			# set marker back to last successful location
-			__gnaw__restore_linkedtext_location($location_in_text);
+			__gnaw__restore_old_text_marker
+				($text_marker_at_start_of_quantifier_attempt);
 			# in case something fails after this,
 			# record how many times to try next time we come here
 			$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
@@ -1303,6 +1496,11 @@ sub __gnaw__quantifier {
 			# operate so we can find out if it passed too.
 			return;
 		}
+
+		# else tried and succeeded.
+		# need to garbage collect the marker.
+		__gnaw__unlink_old_marker($text_marker_at_start_of_quantifier_attempt);
+
 	} 
 
 	# successfully tried the number of calls to operation.
@@ -1443,13 +1641,13 @@ sub __gnaw__capture {
 	$__gnaw__skip->(); 
 
 	my $start_capture_point;
-	__gnaw__current_linkedtext_location($start_capture_point);
+	__gnaw__get_current_text_marker($start_capture_point);
 	$capture_hash->{start} = $start_capture_point;
 
 	$gnaw_coderef->();
 
 	my $stop_capture_point;
-	__gnaw__current_linkedtext_location($stop_capture_point);
+	__gnaw__get_current_text_marker($stop_capture_point);
 	$capture_hash->{stop} = $stop_capture_point;
 
 }
@@ -1470,11 +1668,21 @@ sub __gnaw__execute_callbacks_in_call_tree {
 		$counter++;
 		if(exists($command->{capture})) {
 			print "found capture on call tree at counter '$counter'\n";
-			my $start = $command->{start};
-			my $stop  = $command->{stop};
-			my $string = __gnaw__get_string_between_two_pointers($start, $stop);
+			my $start_marker = $command->{start};
+			my $start_pointer = $start_marker->{pointer_to_text};
+
+			my $stop_marker  = $command->{stop};
+			my $stop_pointer = $stop_marker->{pointer_to_text};
+
+			my $string = __gnaw__get_string_between_two_pointers
+					($start_pointer, $stop_pointer);
 			$callback = $command->{callback};
-			$callback->($string, $start, $stop);
+			$callback->($string, $start_pointer, $stop_pointer);
+
+			# unlink the markers so they can be garbage collected.
+			__gnaw__unlink_old_marker($start_marker);
+			__gnaw__unlink_old_marker($stop_marker);
+
 		} elsif (exists($command->{callback})) {
 			print "found user callback on call tree at counter '$counter'\n";
 			$callback = $command->{callback};
