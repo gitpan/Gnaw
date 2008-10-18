@@ -5,16 +5,27 @@ use strict;
 
 =head1 NAME
 
-Gnaw - The great new Gnaw!
+Gnaw - Define parse grammars using perl subroutine calls. No intermediate grammar languages.
 
 =head1 VERSION
 
-Version 0.01
+Version 0.03
 
 =cut
 
-our $VERSION = '0.02';
+{ 
+package Gnaw;
+our $VERSION = '0.03';
 
+# all the subroutines in Gnaw go into users namespace
+# however, cpan likes to see a package declaration.
+# putting one here inside a lexical block so that 
+# the package declaration is active only inside the
+# block, and then the namespace returns to the user's
+# namespace.
+# declare $VERSION here because it is tied to the Gnaw
+# namespace.
+}
 
 =head1 SYNOPSIS
 
@@ -47,7 +58,7 @@ Currently, EVERYTHING is exported into the callers namespace. Yes, I know, bad p
 
 The problem is I did not want grammars to be weighed down with a bunch of package prefixes at every step.
 
-	my $grammar = Gnaw::match(Gnaw::lit('hello'));
+	my $grammar = Gnaw::match(Gnaw::alternation(Gnaw::lit('hello'),Gnaw::lit('howdy'));
 
 Gets rather tedious.
 
@@ -86,6 +97,7 @@ sub __gnaw__die {
 	my($string) = @_;
 
 	my $location = __gnaw__where_in_code();
+	$location .= __gnaw__string_showing_user_current_location_in_text();
 
 	my $message = $string . "\n" . $location;
 
@@ -102,9 +114,9 @@ sub __gnaw__parse_failed {
 	my $message = "__gnaw__parse_failed ";
 
 	if(0) {	# change this to a 1 for debugging.
-		my $location = __gnaw__where_in_code();
 		$message .= "\n";
-		$message .= $location;
+		$message .= __gnaw__where_in_code();
+		$message .= __gnaw__string_showing_user_current_location_in_text();
 	}
 
 	die $message;
@@ -210,8 +222,13 @@ sub __gnaw__insert_element_in_linked_list_at_end {
 
 
 
-sub __gnaw__current_location {$__gnaw__current_element ;	} 
-sub __gnaw__restore_location {$__gnaw__current_element = $_[0]; } 
+sub __gnaw__current_linkedtext_location {
+	$_[0] = $__gnaw__current_element ;	
+} 
+
+sub __gnaw__restore_linkedtext_location {
+	$__gnaw__current_element = $_[0]; 
+} 
 
 
 sub __gnaw__at_end_of_string {
@@ -332,7 +349,56 @@ sub __gnaw__get_string_between_two_pointers {
 	return $string;
 }
 
+sub __gnaw__string_showing_user_current_location_in_text {
+	my $count;
 
+	my $start = $__gnaw__current_element;
+	$count = 100;
+	my $prestring = '';
+
+	# starting from current location,
+	# back up to the beginning of the line.
+	# don't go past 100 characters
+	# and don't go past the beginning marker.
+	while( 	($count--) and  
+		($start ne $__gnaw__head_element) and 
+		($start->[__GNAW__LETTER] ne "\n") 
+	){
+		$start = $start->[__GNAW__PREV];
+		$prestring = $start->[__GNAW__LETTER] . $prestring;
+	}
+
+
+	my $current_character = __gnaw__curr_character();
+
+	my $stop = $__gnaw__current_element;
+	unless($stop eq $__gnaw__tail_element) {
+		$stop = $stop->[__GNAW__NEXT];
+	}
+	$count = 100;
+	my $poststring = '';
+
+	# starting from current location plus one,
+	# move to the end of the line.
+	# don't go past 100 characters
+	# and don't go past the end marker.
+	while( 	($count--) and  
+		($stop ne $__gnaw__tail_element) and 
+		($stop->[__GNAW__LETTER] ne "\n") 
+	){
+		$stop = $stop->[__GNAW__NEXT];
+		$poststring = $poststring . $stop->[__GNAW__LETTER];
+	}
+
+	my $final_string = 
+		$prestring . ' >HERE> ' . $current_character . ' <HERE< ' . $poststring . "\n";
+
+	return $final_string;
+}
+
+
+# what if element being deleted is current location or a location 
+# that some other pointer is pointing to?
 sub __gnaw__delete_this_element_from_linked_list {
 	my ($element)=@_;
 
@@ -385,8 +451,16 @@ sub __gnaw__initialize_call_tree {
 	$__gnaw__latest_call = $__gnaw__call_tree;
 }
 
-
 __gnaw__initialize_call_tree();
+
+
+sub __gnaw__current_calltree_location {
+	$_[0] = $__gnaw__latest_call;
+}
+
+sub __gnaw__restore_calltree_location {
+	$__gnaw__latest_call = $_[0];
+}
 
 
 sub __gnaw__try_to_parse {
@@ -514,17 +588,18 @@ sub __gnaw__check_all_coderefs {
 }
 
 =head2 match
-This is equivalent to the "m" part of a perl regexp of $string=~m//.  The match function takes a grammar and attempts to find the first match within the string. If a match is found, the function returns true (1), else it returns false (0). The match function takes a series() of grammar components such as lit, set, quantifier, etc. The match function returns a coderef to the grammar. The "match" function should have no other grammar components outside of it. When calling the grammar, dereference the coderef returned by "match" and pass it the string you want to apply to the grammar.
 
-# create the grammar
-my $grammar = match(lit('hello'));
+This is equivalent to the "m" part of a perl regexp of $string\=~m//.  The match function takes a grammar and attempts to find the first match within the string. If a match is found, the function returns true (1), else it returns false (0). The match function takes a series() of grammar components such as lit, set, quantifier, etc. The match function returns a coderef to the grammar. The "match" function should have no other grammar components outside of it. When calling the grammar, dereference the coderef returned by "match" and pass it the string you want to apply to the grammar.
 
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# create the grammar
+	my $grammar = match(lit('hello'));
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 =cut
 
@@ -544,7 +619,8 @@ sub __gnaw__match {
 	until( __gnaw__at_end_of_string() ) {
 		__gnaw__initialize_call_tree();
 
-		my $position = __gnaw__current_location();
+		my $position;
+		__gnaw__current_linkedtext_location($position);
 
 		my $sub = sub { __gnaw__series(@coderefs) };
 
@@ -553,7 +629,7 @@ sub __gnaw__match {
 			__gnaw__commit();
 			return 1;
 		} else {
-			__gnaw__restore_location($position);
+			__gnaw__restore_linkedtext_location($position);
 			__gnaw__move_pointer_forward();
 		}
 	}
@@ -563,19 +639,20 @@ sub __gnaw__match {
 }
 
 =head2 series
+
 The "series" function is a gnaw grammar component which takes a series of other grammar components. This is the only way to define a grammar with one component occurring after another. The "series" function takes a series of other grammar components and returns a coderef to that portion of the grammar. 
 
 The "series" function returns a coderef that is used in part of a larger grammar.
 
-# look for a series of two literals, "hello" followed by "world", in the string being parsed.
-my $grammar = match( series(lit('hello'), lit('world')) );
-
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# look for a series of two literals, "hello" followed by "world"
+	my $grammar = match( series(lit('hello'), lit('world')) );
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";	
+	}	
 
 =cut
 
@@ -606,19 +683,20 @@ sub __gnaw__series {
 
 
 =head2 lit
+
 The "lit" function is a gnaw grammar component which applies a literal string value to the string being parsed. The literal value may be a single character or more than one character. 
 
 The "lit" function returns a coderef that is used in part of a larger grammar.
 
-# look for the literal string "hello" in the string being parsed
-my $grammar = match(lit('hello'));
-
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# look for the literal string "hello" in the string being parsed
+	my $grammar = match(lit('hello'));
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 =cut
 
@@ -690,19 +768,20 @@ sub __gnaw__convert_character_class_string_into_hash_ref {
 }
 
 =head2 set
+
 The "set" function is a gnaw grammar component which applies a character class or character set to the string being parsed. Since "class" is a perl reserved word, gnaw uses the word "set" for character set. The "set" function takes a string which describes the character class. The "set" function parses one metacharacter within the string and that is a '-' character. This is used to define a range of charcters. All digits can be described as "0-9". All letters can be described as "a-zA-Z". If you want the "-" character to be part of the set itself, make it the first character in the string you pass into set.
 
 The "set" function returns a coderef that is used in part of a larger grammar.
 
-# look for an x, y, or z within the string being parsed
-my $grammar = match(set("xyz"));
-
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# look for an x, y, or z within the string being parsed
+	my $grammar = match(set("xyz"));
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 =cut
 
@@ -746,19 +825,20 @@ sub __gnaw__set {
 # character classes NOT: anything BUT what's in the specified class of characters.
 
 =head2 set_n
+
 The "set_n" function is a gnaw grammar component which applies a NEGATIVE character class or NEGATIVE character set to the string being parsed. The "set_n" function takes a string which describes the character class. The "set_n" function parses one metacharacter within the string and that is a '-' character. This is used to define a range of charcters. All digits can be described as "0-9". All letters can be described as "a-zA-Z". If you want the "-" character to be part of the set itself, make it the first character in the string you pass into set.
 
 The "set_n" function returns a coderef that is used in part of a larger grammar.
 
-# look for anything other than an x, y, or z in the string being parsed.
-my $grammar = match(set_n("xyz"));
-
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# look for anything other than an x, y, or z in the string being parsed.
+	my $grammar = match(set_n("xyz"));
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 =cut
 
@@ -768,6 +848,9 @@ sub set_n {
 	my $char_set_hash_ref = 
 		__gnaw__convert_character_class_string_into_hash_ref
 			($characterset);
+
+	# at the end of the string, code may return a null string
+	$char_set_hash_ref->{''} = 1;
 
 	my $status = {};
 	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
@@ -796,7 +879,9 @@ sub __gnaw__set_n {
 }
 
 =head2 set_digit
+
 The "set_digit" is a shortcut equivalent to set('0-9'). 
+
 =cut
 
 sub set_digit {
@@ -805,7 +890,9 @@ sub set_digit {
 
 
 =head2 set_DIGIT
+
 The "set_digit" is a shortcut equivalent to set_n('0-9'). 
+
 =cut
 
 sub set_DIGIT {
@@ -813,28 +900,37 @@ sub set_DIGIT {
 }
 
 =head2 set_whitespace
+
 The "set_whitespace" is a shortcut equivalent to set("\t\n\r\f"). 
+
 =cut
 sub set_whitespace {
 	return set("\t\n\r\f");
 }
 
 =head2 set_WHITESPACE
+
 The "set_WHITESPACE" is a shortcut equivalent to set_n("\t\n\r\f"). 
+
 =cut
 sub set_WHITESPACE {
 	return set_n("\t\n\r\f");
 }
 
 =head2 set_identifier
+
 The "set_identifier" is a shortcut equivalent to set('a-zA-Z0-9_'). 
+
 =cut
+
 sub set_identifier {
 	return set('a-zA-Z0-9_');
 }
 
 =head2 set_IDENTIFIER
+
 The "set_IDENTIFIER" is a shortcut equivalent to set_n('a-zA-Z0-9_'). 
+
 =cut
 
 sub set_IDENTIFIER {
@@ -844,36 +940,37 @@ sub set_IDENTIFIER {
 
 
 =head2 alternation
+
 The "alternation" function is a gnaw grammar component which applies one of several possible alternatives to the string being parsed. The "alternation" function will attempt each possible alternative in the order it is passed into the function as a parameter. Each alternative must be a single command. 
 
-# look for people we know
-my $grammar = match(alternation(lit('alice'), lit('bob')));
-
-# apply the grammar to a string
-if($grammar->('hello alice')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# look for people we know
+	my $grammar = match(alternation(lit('alice'), lit('bob')));
+	
+	# apply the grammar to a string
+	if($grammar->('hello alice')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 If an alternative needs to be made of more than one grammar command, either bundle them together using a "series" function, or create a named subroutine that will act as a named rule for your grammar, and call that subroutine as one of your alternates.
 
-# one alternative will be a series of two literals, 'hello' followed by 'world'.
-# create a subroutine that will contain this rule.
-sub greet_all { series(lit('hello'), lit('world'));}
+	# one alternative will be a series of two literals, 'hello' followed by 'world'.
+	# create a subroutine that will contain this rule.
+	sub greet_all { series(lit('hello'), lit('world'));}
+	
+	# another alternative will be a series of two literals, "howdy" followed by "partner"
+	sub greet_one { series(lit('howdy'), lit('partner'));}
+	
+	# look for either greeting	
+	my $grammar = match(alternation(greet_all, greet_one));
 
-# another alternative will be a series of two literals, "howdy" followed by "partner"
-sub greet_one { series(lit('howdy'), lit('partner'));}
-
-# look for either greeting
-my $grammar = match(alternation(greet_all, greet_one));
-
-# apply the grammar to a string
-if($grammar->('hello world')) {
-	print "match\n";
-} else {
-	print "no match";
-}
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
 
 The "alternation" function returns a coderef that is used in part of a larger grammar.
 
@@ -900,10 +997,12 @@ sub alternation {
 
 
 sub __gnaw__alternation {
-	my $location_start_of_alternation = __gnaw__current_location();
+	my $location_start_of_alternation;
+	__gnaw__current_linkedtext_location($location_start_of_alternation);
 
-	my $location_of_alternation_on_call_tree = $__gnaw__latest_call;
+	my $location_of_alternation_on_call_tree;
 
+	__gnaw__current_calltree_location($location_of_alternation_on_call_tree);
 
 	# try each alternate
 	foreach my $alternate (@_) {
@@ -914,9 +1013,9 @@ sub __gnaw__alternation {
 		}
 
 		# else go back to where alternation started and try next alternation
-		__gnaw__restore_location($location_start_of_alternation);
+		__gnaw__restore_linkedtext_location($location_start_of_alternation);
 
-		$__gnaw__latest_call = $location_of_alternation_on_call_tree;
+		__gnaw__restore_calltree_location( $location_of_alternation_on_call_tree );
 	}
 
 	# if no alternate worked, then alternation failed.
@@ -954,6 +1053,7 @@ sub __gnaw__numeric_check {
 
 
 =head2 quantifier
+
 The "quantifier" function is a gnaw grammar component which receives a single grammar component and attempts to apply that command repeatedly to the string being parsed. The parameters passed into the "quantifier" function are defined as follows:
 
 quantifier( thrifty_or_greedy , single_grammar_component , minimum , maximum );
@@ -969,29 +1069,30 @@ The maximum parameter is the maximum number of times the component must successf
 The "quantifier" function also allows some shortcuts instead of the numeric "minimum" and "maximum" parameters. 
 
 '*' means "0 or more"
+
 's' and '+' means "1 or more"
 
 
-# look for 3 to 7 letter 'a'. Use a thrifty search.
-my $grammar = match(quantifier('t', lit('a'), 3,7));
+	# look for 3 to 7 letter 'a'. Use a thrifty search.
+	my $grammar = match(quantifier('t', lit('a'), 3,7));
 
-# look for 3 or more letter 'a'. still thrifty.
-my $grammar = match(quantifier('t', lit('a'), 3));
+	# look for 3 or more letter 'a'. still thrifty.
+	my $grammar = match(quantifier('t', lit('a'), 3));
 
-# look for 3 or more letter 'a'. greedy search.
-my $grammar = match(quantifier('g', lit('a'), 3));
+	# look for 3 or more letter 'a'. greedy search.
+	my $grammar = match(quantifier('g', lit('a'), 3));
 
-# look for 3 or more letter 'a'. greedy search.
-my $grammar = match(quantifier(lit('a'), 3));
+	# look for 3 or more letter 'a'. greedy search.
+	my $grammar = match(quantifier(lit('a'), 3));
 
-# look for 1 or more letter 'a'. greedy search.
-my $grammar = match(quantifier(lit('a'), 's'));
+	# look for 1 or more letter 'a'. greedy search.
+	my $grammar = match(quantifier(lit('a'), 's'));
 
-# look for 1 or more letter 'a'. greedy search.
-my $grammar = match(quantifier(lit('a'), '+'));
+	# look for 1 or more letter 'a'. greedy search.
+	my $grammar = match(quantifier(lit('a'), '+'));
 
-# look for 0 or more letter 'a'. greedy search.
-my $grammar = match(quantifier(lit('a'), '*'));
+	# look for 0 or more letter 'a'. greedy search.
+	my $grammar = match(quantifier(lit('a'), '*'));
 
 The "quantifier" function returns a coderef that is used in part of a larger grammar.
 
@@ -1106,7 +1207,9 @@ sub quantifier{
 }
 
 =head2 thrifty
+
 The "thrifty" function is a shortcut to the "quantifier" function with the thrifty/greedy parameter forced to thrifty.
+
 =cut
 
 sub thrifty{
@@ -1115,7 +1218,9 @@ sub thrifty{
 }
 
 =head2 greedy
+
 The "greedy" function is a shortcut to the "quantifier" function with the thrifty/greedy parameter forced to greedy.
+
 =cut
 
 sub greedy{
@@ -1126,7 +1231,9 @@ sub greedy{
 sub __gnaw__quantifier {
 	my($operation)=@_;
 
-	my $quantifier_hash = $__gnaw__latest_call;
+	my $quantifier_hash;
+	__gnaw__current_calltree_location($quantifier_hash);
+
 	my $try = $quantifier_hash->{try};
 
 	my $openended = defined($try) ? 0 : 1;
@@ -1152,8 +1259,10 @@ sub __gnaw__quantifier {
 	for($cnt=1; ($openended or ($cnt<=$try)); $cnt++) {
 
 		# save current location
-		my $location_in_text = __gnaw__current_location();
-		my $location_on_call_tree = $__gnaw__latest_call;
+		my $location_in_text;
+		__gnaw__current_linkedtext_location($location_in_text);
+		my $location_on_call_tree;
+		__gnaw__current_calltree_location($location_on_call_tree);
 
 
 
@@ -1161,7 +1270,7 @@ sub __gnaw__quantifier {
 		if(__gnaw__try_to_parse($operation) == 0) {
 
 			# failed, restore call tree to last success
-			$__gnaw__latest_call = $location_on_call_tree;
+			__gnaw__restore_calltree_location( $location_on_call_tree );
 
 
 			# if the number of successes isn't within min,max
@@ -1185,7 +1294,7 @@ sub __gnaw__quantifier {
 
 			# the number of successes are within acceptable min/max range.
 			# set marker back to last successful location
-			__gnaw__restore_location($location_in_text);
+			__gnaw__restore_linkedtext_location($location_in_text);
 			# in case something fails after this,
 			# record how many times to try next time we come here
 			$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
@@ -1207,26 +1316,28 @@ sub __gnaw__quantifier {
 
 
 =head2 callback
+
 If you want to call a user-defined callback any time the parser hits a specific point of the grammar, simply insert a reference to a subroutine in that location in the grammar and it will be called every time the parser hits that location, whether the grammar ends up succeeding later or not.
 
-# want between 7 and 9 letter 'a'. and every time we try, print the letter "X".
-my $grammar = match(quantifier('t', series(lit('a'), sub{print"X\n";}) , 7,9));
+	# want between 7 and 9 letter 'a'. and every time we try, print the letter "X".
+	my $grammar = match(quantifier('t', series(lit('a'), sub{print"X\n";}) , 7,9));
 
-# this will not match, but it will print out an "X" for every time "quantifier" tried to match before the parser fails.
-$grammar->('aaaaa');
+	# this will not match, but it will print out an "X" for every time 
+	# "quantifier" tried to match before the parser fails.
+	$grammar->('aaaaa');
 
 The "callback" function takes a single code reference to any user-defined subroutine and calls that coderef only if the parser succeeds. Success is defined as either (1) reaching the end of the grammar and successfully matching the string being parsed or (2) the grammar executes a "commit" function, which is defined later.
 
 Note that "callback" is a scheduled call and only makes the actual call when grammar succeeds.
 
-# look for a series of two literals, "hello" followed by "world", in the string being parsed.
-my $grammar = match(greedy( series(lit('a'), callback(sub{print"X\n";})), 7,9) );
+	# look for a series of two literals, "hello" followed by "world", 
+	my $grammar = match(greedy( series(lit('a'), callback(sub{print"X\n";})), 7,9) );
 
-# this will fail to match and no callback will be called.
-$grammar->('aaaaa');
+	# this will fail to match and no callback will be called.
+	$grammar->('aaaaa');
 
-# this will match and all the callbacks will be called at the end.
-$grammar->('aaaaaaaaaaaaaaaa');
+	# this will match and all the callbacks will be called at the end.
+	$grammar->('aaaaaaaaaaaaaaaa');
 
 =cut
 
@@ -1258,24 +1369,25 @@ sub callback {
 }
 
 =head2 capture
+
 The "capture" function is a specialized version of "callback". The user passes two parameters into "capture", (1) a grammar component and (2) a callback, a code reference to a user-defined subroutine which will be called when the grammar succeeds.
 
 The callback will receive a copy of the string containing whatever was captured within the given grammar component. This will be passed via the @_ variable.
 
-my $capture_callback = sub{
-	my ($string) = @_;
-	print "captured string is '$string'\n";
-};
+	my $capture_callback = sub{
+		my ($string) = @_;
+		print "captured string is '$string'\n";
+	};
 
 
-# capture the first "a" we find.
-my $grammar = match(capture(lit('a', $capture_callback));
+	# capture the first "a" we find.
+	my $grammar = match(capture(lit('a', $capture_callback));
 
-# this will not match, the capture callback will not be called.
-$grammar->('xxxxx');
+	# this will not match, the capture callback will not be called.
+	$grammar->('xxxxx');
 
-# this will match and the capture callback will be called upon success.
-$grammar->('aaaaa');
+	# this will match and the capture callback will be called upon success.
+	$grammar->('aaaaa');
 
 Note that "capture" creates a scheduled call and only makes the actual call when the grammar succeeds.
 
@@ -1321,7 +1433,8 @@ sub capture {
 sub __gnaw__capture {
 	my ($gnaw_coderef, $callback_coderef)=@_;
 
-	my $capture_hash = $__gnaw__latest_call;
+	my $capture_hash;
+	__gnaw__current_calltree_location($capture_hash);
 
 	# the next rule might skip some white space, if "skip" says to do that.
 	# if "skip" says to skip anything, then we don't want to capture it.
@@ -1329,12 +1442,14 @@ sub __gnaw__capture {
 	# note if user wants to capture whitespace, they should have set skip to a null subroutine
 	$__gnaw__skip->(); 
 
-	my $start_capture_point = __gnaw__current_location();
+	my $start_capture_point;
+	__gnaw__current_linkedtext_location($start_capture_point);
 	$capture_hash->{start} = $start_capture_point;
 
 	$gnaw_coderef->();
 
-	my $stop_capture_point = __gnaw__current_location();
+	my $stop_capture_point;
+	__gnaw__current_linkedtext_location($stop_capture_point);
 	$capture_hash->{stop} = $stop_capture_point;
 
 }
@@ -1345,7 +1460,8 @@ sub __gnaw__capture {
 sub __gnaw__execute_callbacks_in_call_tree {
 	#__gnaw__dump_current_call_tree();
 
-	my $command = $__gnaw__latest_call;
+	my $command;
+	__gnaw__current_calltree_location($command);
 
 	my $callback;
 	my $counter = 0;
@@ -1374,7 +1490,9 @@ sub __gnaw__execute_callbacks_in_call_tree {
 # go through call tree and call any callbacks,
 # wipe out the call tree, 
 # and delete the text being parsed up to this point.
-=head2 capture
+
+=head2 commit
+
 NOTE: THE "commit" FUNCTION DOES NOT WORK RIGHT NOW.
 
 In fact, it makes the parser go all wonky. I believe to get "commit" to work I will have to rewrite a bunch of other bits in the parser. But, when "commit" does hopefully work, this is what it will do:
@@ -1387,13 +1505,13 @@ The "commit" function will cause any callbacks and any captures to execute upon 
 
 The "commit" function also causes a number of things to occur behind the scenes which mean that un-committing is not possible. Internal data structures which have accumulated during the parsing of the string will be deleted. If you have a "commit" function in your grammar, if your parser hits that point, you can not uncommit at a later time. 
 
-# the callback will schedule the "x" to be printed on success,
-# but the "commit" function immediately after will be treated as a success
-# and cause the callback to be called.
-my $grammar = match(greedy( series(lit('a'), callback(sub{print"X\n";}), commit) 7,9) );
-
-# this will fail to match but the callbacks will be called because "commit" forces them.
-$grammar->('aaaaa');
+	# the callback will schedule the "x" to be printed on success,
+	# but the "commit" function immediately after will be treated as a success
+	# and cause the callback to be called.
+	my $grammar = match(greedy( series(lit('a'), callback(sub{print"X\n";}), commit) 7,9) );
+	
+	# this will fail to match but the callbacks will be called because "commit" forces them.
+	$grammar->('aaaaa');
 
 =cut
 
@@ -1483,7 +1601,5 @@ under the same terms as Perl itself.
 
 
 =cut
-
-package Gnaw;
 
 1; # End of Gnaw

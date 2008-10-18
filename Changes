@@ -1,11 +1,16 @@
 Revision history for Gnaw
 
 0.01    17 Oct 2008/11:15 pm
-        First version, released on an unsuspecting world.
-	Basic grammars can be created and executed.
-	The "commit" function is busted, though, and
-	large chunks of the module may need to be rewritten
-	to fix it. All the other functions seem to be doing 
-	their job. Well, except for set_n, which is also
-	broken, but fixing it probably won't require a massive
-	module-wide rewrite.
+
+First version, released on an unsuspecting world. Basic grammars can be created and executed.
+The "commit" function is busted, though, and large chunks of the module may need to be rewritten to fix it. All the other functions seem to be doing their job. Well, except for set_n, which is also broken, but fixing it probably won't require a massive module-wide rewrite.
+
+0.02	17 Oct 2008
+
+added a package declaration.
+
+0.03	18 Oct 2008
+
+Mainly fixed a lot of problems with POD. Documentation should be readable now using perldoc.
+Also, hacked a fix for set_n. It was hitting end of string, and end of string returns null string, so I added null string to the class of disallowed characters. 
+Lastly, wrapped up the "current" and "restore" pointers into subroutine calls. I think the fix for "commit" problems is to keep track of everyone who points to the linked list of text or the call tree, and any time we delete text or call tree branches, we have to update anyone who is pointing to those locations. 
