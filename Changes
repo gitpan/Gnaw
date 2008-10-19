@@ -2,8 +2,14 @@ Revision history for Gnaw
 
 0.01    17 Oct 2008/11:15 pm
 
-First version, released on an unsuspecting world. Basic grammars can be created and executed.
-The "commit" function is busted, though, and large chunks of the module may need to be rewritten to fix it. All the other functions seem to be doing their job. Well, except for set_n, which is also broken, but fixing it probably won't require a massive module-wide rewrite.
+First version, released on an unsuspecting world. Basic grammars 
+can be created and executed.
+
+The "commit" function is busted, though, and large chunks of the 
+module may need to be rewritten to fix it. All the other functions 
+seem to be doing their job. Well, except for set_n, which is also 
+broken, but fixing it probably won't require a massive module-wide 
+rewrite.
 
 0.02	17 Oct 2008
 
@@ -11,12 +17,48 @@ added a package declaration.
 
 0.03	18 Oct 2008
 
-Mainly fixed a lot of problems with POD. Documentation should be readable now using perldoc.
-Also, hacked a fix for set_n. It was hitting end of string, and end of string returns null string, so I added null string to the class of disallowed characters. 
-Lastly, wrapped up the "current" and "restore" pointers into subroutine calls. I think the fix for "commit" problems is to keep track of everyone who points to the linked list of text or the call tree, and any time we delete text or call tree branches, we have to update anyone who is pointing to those locations. 
+Mainly fixed a lot of problems with POD. Documentation should be 
+readable now using perldoc.
+
+Also, hacked a fix for set_n. It was hitting end of string, and end 
+of string returns null string, so I added null string to the class 
+of disallowed characters. 
+
+Lastly, wrapped up the "current" and "restore" pointers into 
+subroutine calls. I think the fix for "commit" problems is to keep 
+track of everyone who points to the linked list of text or the call 
+tree, and any time we delete text or call tree branches, we have to 
+update anyone who is pointing to those locations. 
 
 0.04	18 Oct 2008
 
-changed how grammar commands access the linked list of text. created a concept called a "marker" so that as we delete text in linked list we can update any commands that pointed to old text that is to be deleted.
+changed how grammar commands access the linked list of text. created 
+a concept called a "marker" so that as we delete text in linked list 
+we can update any commands that pointed to old text that is to be 
+deleted.
 
-This should help the "commit" function, but the commit tests are still failing.
+This should help the "commit" function, but the commit tests are 
+still failing.
+
+0.05	19 Oct 2008
+
+Changed the code for handling get/restore of position within the 
+call tree. Quantifiers were a serious jumble with this. added some 
+debugging routines, cause this gets pretty nasty even with a simple 
+grammar. See the GNAWMONITOR subroutine, now called amply throughout 
+the module. last but not least, I added a new quantifier test 
+(command_quantifier_multi). This test creates a grammar of 
+
+series(greedy(lit('x'),'s'), greedy(lit('x'),'s')).
+
+The parser should be able to handle it, but doesn't. test fails. 
+Probably another problem with the fricken markers. 
+Actually, probably an issue with getting the call to greedy to 
+remember the last number of times it tried, and try one less the 
+second time around. need to debug the quantifier "try" and "success" 
+numbers through the flow. Argh.
+
+oh, and put hardreturns into the readme.
+
+
+

@@ -11,6 +11,7 @@ t/command_capture.t
 t/command_commit.t
 t/command_match_lit.t
 t/command_quantifier_capture.t
+t/command_quantifier_multi.t
 t/command_quantifier.t
 t/command_series.t
 t/command_set_n.t

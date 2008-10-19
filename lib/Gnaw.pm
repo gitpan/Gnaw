@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -74,8 +74,39 @@ use warnings;
 use strict;
 use Data::Dumper; 
 
+sub GNAWMONITOR {}
+
+sub GNAWMONITOR_0 {
+	print "MONITOR: "; 
+
+	# if user passes in a message, print it
+	if(scalar(@_)){
+		my $str=shift(@_);
+		print $str;
+	} 
+
+	# print the name of the subroutine that called MONITOR
+	my $subname = (caller(1))[3];
+	print $subname;
+	my $linenum = (caller(1))[2];
+
+	# print the name of the subroutine that called this subroutine
+	print " called from ";
+	my $calledfrom = (caller(2))[3];
+	unless(defined($calledfrom)) {
+		$calledfrom = '(no one?)';
+	}
+	print $calledfrom." ";
+
+	print "line ".$linenum."\n";
+}
+
+
 
 sub __gnaw__where_in_code {
+	GNAWMONITOR;
+
+
 	my $location = '';
 
 	my $cnt=2;
@@ -94,7 +125,10 @@ sub __gnaw__where_in_code {
 }
 
 sub __gnaw__die {
+	GNAWMONITOR;
 	my($string) = @_;
+
+	#__gnaw__dump_current_call_tree();
 
 	my $location = __gnaw__where_in_code();
 	$location .= __gnaw__string_showing_user_current_location_in_text();
@@ -109,11 +143,19 @@ sub __gnaw__die {
 our $__gnaw__parse_failed;
 
 sub __gnaw__parse_failed {
+	GNAWMONITOR;
 	$__gnaw__parse_failed=1;
+
+	if(0) {
+		print "\n\n\n__gnaw__parse_failed START DUMP\n";
+		print __gnaw__where_in_code();
+		print __gnaw__string_showing_user_current_location_in_text();
+		print "\n__gnaw__parse_failed END DUMP\n\n\n";
+	}
 
 	my $message = "__gnaw__parse_failed ";
 
-	if(0) {	# change this to a 1 for debugging.
+	if(0) {	# change this to a 1 for dumping trace info.
 		$message .= "\n";
 		$message .= __gnaw__where_in_code();
 		$message .= __gnaw__string_showing_user_current_location_in_text();
@@ -147,9 +189,9 @@ sub __GNAW__LOCATION_MARKERS {3;}
 # these two elements never get deleted
 our $__gnaw__head_element    ;
 our $__gnaw__tail_element    ;
-our $__gnaw__current_element ;  
+our $__gnaw__current_linkedtext_element ;  
 
-# __gnaw__current_element is a plain pointer into the linked list.
+# __gnaw__current_linkedtext_element is a plain pointer into the linked list.
 # any subroutine dealing directly with linked list can
 # reference the current_element variable.
 # all other blocks must user sub calls to 
@@ -168,6 +210,7 @@ our $__gnaw__current_element ;
 
 
 sub __gnaw__initialize_linked_list_to_empty {
+	GNAWMONITOR;
 	$__gnaw__head_element = [];
 	$__gnaw__tail_element = [];
 
@@ -182,44 +225,18 @@ sub __gnaw__initialize_linked_list_to_empty {
 	$__gnaw__tail_element->[__GNAW__PREV]	= $__gnaw__head_element;
 	$__gnaw__tail_element->[__GNAW__NEXT]	= $__gnaw__head_element;
 	$__gnaw__tail_element->[__GNAW__LETTER]	= '';
-	$__gnaw__head_element->[__GNAW__LOCATION_MARKERS] = 
+	$__gnaw__tail_element->[__GNAW__LOCATION_MARKERS] = 
 		{debug=>"THIS IS THE TAIL ELEMENT!!!! NO MARKERS HERE"};
 
-	$__gnaw__current_element  = $__gnaw__head_element;
+	$__gnaw__current_linkedtext_element  = $__gnaw__head_element;
 }
 
 
 
 __gnaw__initialize_linked_list_to_empty();
 
-
-
-sub __gnaw__dump_linked_list {
-	print "START OF LIST\n";
-
-	my $this = $__gnaw__head_element->[__GNAW__NEXT];
-
-	while($this ne $__gnaw__tail_element) {
-		my $letter = $this->[__GNAW__LETTER];
-		print "letter is '$letter'";
-
-		if($this eq $__gnaw__current_element) {
-			print " < current_element ";
-		}
-
-		print "\n";
-		$this = $this->[__GNAW__NEXT];
-	}
-
-	print "END OF LIST\n";
-	
-}
-
-
-
-
-
-sub __gnaw__insert_element_in_linked_list_after_this {
+sub __gnaw__insert_element_in_linked_list_after_this {
+	GNAWMONITOR;
 	my ($ptr_to_this_element, $letter_to_insert)=@_;
 
 	my $newelement = [];
@@ -239,6 +256,7 @@ sub __gnaw__insert_element_in_linked_list_after_this {
 
 
 sub __gnaw__insert_element_in_linked_list_at_end {
+	GNAWMONITOR;
 	my ($letter)=@_;
 
 	my $last = $__gnaw__tail_element->[__GNAW__PREV];
@@ -250,7 +268,7 @@ sub __gnaw__insert_element_in_linked_list_at_end {
 # text markers, an explanation.
 #
 # the text is stored in a linked list.
-# the __gnaw__current_element variable points to whatever is
+# the __gnaw__current_linkedtext_element variable points to whatever is
 # the current element in the linked list that we are working on now.
 #
 # However, parsing commands need more intelligent markers than
@@ -314,14 +332,16 @@ sub __gnaw__insert_element_in_linked_list_at_end {
 sub __gnaw__get_current_text_marker {
 	# create the text marker and initialize it
 	my $markerref = {};
-	$markerref->{pointer_to_text} = $__gnaw__current_element;
+	$markerref->{pointer_to_text} = $__gnaw__current_linkedtext_element;
 	$markerref->{original_characters_deleted}=0;
+	GNAWMONITOR($markerref);
+	GNAWMONITOR($__gnaw__current_linkedtext_element);
 
 	# make sure the current element in linked list of text knows
 	# that the marker we just created is pointing to this element.
 
 	# a. get the hashref for this element that contains the location markers for this element
-	my $pointers_for_this_element = $__gnaw__current_element->[__GNAW__LOCATION_MARKERS];
+	my $pointers_for_this_element = $__gnaw__current_linkedtext_element->[__GNAW__LOCATION_MARKERS];
 
 	# the address of our new marker is the key into the element's hash of location markers
 	my $markeraddress = $markerref.'';
@@ -335,6 +355,7 @@ sub __gnaw__get_current_text_marker {
 
 sub __gnaw__restore_old_text_marker {
 	my($markerref) = @_;
+	GNAWMONITOR($markerref);
 
 	if(exists($markerref->{MARKER_DELETED})) {
 		__gnaw__die("tried to __gnaw__restore_old_text_marker with a marker that had already been restored. Need to __gnaw__get_current_text_marker after every restore.");
@@ -342,9 +363,10 @@ sub __gnaw__restore_old_text_marker {
 
 	# the marker points to some element in linked list.
 	# set the current_element to whatever the marker points to.
-	$__gnaw__current_element = $markerref->{pointer_to_text};
+	$__gnaw__current_linkedtext_element = $markerref->{pointer_to_text};
+	GNAWMONITOR($__gnaw__current_linkedtext_element);
 
-	__gnaw__unlink_old_marker($markerref);
+	__gnaw__unlink_old_text_marker($markerref);
 }
 
 
@@ -352,15 +374,18 @@ sub __gnaw__restore_old_text_marker {
 # this means that the only thing left pointing to the marker after this call
 # should be the grammar command that got the marker in the first place.
 # once they're done with it, perl should garbage collect the hash.
-sub __gnaw__unlink_old_marker {
+sub __gnaw__unlink_old_text_marker {
 	my($markerref) = @_;
+	GNAWMONITOR($markerref);
 
 	# the element in the linked list contains a hash of location markers.
 	# we want to go into that hash and delete this marker.
 	# this will allow garbage collection to kick in if needed.
-	# this is also why the user can only restore a marker once.
+	# this is also why the user can only restore a marker once,
+	# because once we restore it, we remove it from the text linked list.
 
 	my $element_in_list = $markerref->{pointer_to_text};
+	GNAWMONITOR($element_in_list);
 
 	# get a reference to the markers for this element
 	my $markers_for_this_element = $element_in_list->[__GNAW__LOCATION_MARKERS];
@@ -385,7 +410,8 @@ sub __gnaw__unlink_old_marker {
 } 
 
 sub __gnaw__at_end_of_string {
-	if($__gnaw__current_element eq $__gnaw__tail_element) {
+	GNAWMONITOR;
+	if($__gnaw__current_linkedtext_element eq $__gnaw__tail_element) {
 		return 1;
 	} else { 
 		return 0;
@@ -393,22 +419,24 @@ sub __gnaw__at_end_of_string {
 }
 
 sub __gnaw__move_pointer_forward {
+	GNAWMONITOR;
 	if(__gnaw__at_end_of_string()) {
 		__gnaw__parse_failed();
 	}
-	$__gnaw__current_element = $__gnaw__current_element->[__GNAW__NEXT];
+	$__gnaw__current_linkedtext_element = $__gnaw__current_linkedtext_element->[__GNAW__NEXT];
 }	
 
 ####################################################################
 # skip is called by low level routine that handles linked list of text
 ####################################################################
 
-our $__gnaw__skip_whitespace = sub {
+our $__gnaw__skip_whitespace = sub{
+	GNAWMONITOR('skipwhitespace');
 	if(__gnaw__at_end_of_string()) {
 			return;
 	}
 
-	my $letter =  $__gnaw__current_element->[__GNAW__LETTER];
+	my $letter =  $__gnaw__current_linkedtext_element->[__GNAW__LETTER];
 
 	# \t\n\r\f
 	while(
@@ -418,7 +446,7 @@ our $__gnaw__skip_whitespace = sub {
 		($letter eq "\f")
 	) {
 		__gnaw__move_pointer_forward();
-		$letter =  $__gnaw__current_element->[__GNAW__LETTER];
+		$letter =  $__gnaw__current_linkedtext_element->[__GNAW__LETTER];
 	}
 };
 
@@ -435,17 +463,19 @@ our $__gnaw__skip = $__gnaw__skip_whitespace;
 
 
 sub __gnaw__curr_character {
+	GNAWMONITOR;
 	if(__gnaw__at_end_of_string()) {
 		return 0;
 	}
 
 	$__gnaw__skip->();
 
-	my $letter =  $__gnaw__current_element->[__GNAW__LETTER];
+	my $letter =  $__gnaw__current_linkedtext_element->[__GNAW__LETTER];
 	return $letter;
 }
 
 sub __gnaw__next_character {
+	GNAWMONITOR;
 	my $curr_char = __gnaw__curr_character();
 	__gnaw__move_pointer_forward();
 	return $curr_char;
@@ -453,6 +483,7 @@ sub __gnaw__next_character {
 
 
 sub __gnaw__initialize_string_to_parse {
+	GNAWMONITOR;
 	my ($string) = @_;
 
 	my @letters = split(//, $string);
@@ -462,6 +493,10 @@ sub __gnaw__initialize_string_to_parse {
 	foreach my $letter (@letters) {
 		__gnaw__insert_element_in_linked_list_at_end($letter);
 	}
+
+	#current pointer will be pointing to HEAD marker. move it up one.
+	$__gnaw__current_linkedtext_element = 
+	$__gnaw__current_linkedtext_element->[__GNAW__NEXT];
 }
 
 
@@ -469,6 +504,7 @@ sub __gnaw__initialize_string_to_parse {
 
 
 sub __gnaw__get_string_between_two_pointers {
+	GNAWMONITOR;
 	my ($start,$stop) = @_;
 
 	unless(defined($start)) {
@@ -503,57 +539,92 @@ sub __gnaw__get_string_between_two_pointers {
 }
 
 sub __gnaw__string_showing_user_current_location_in_text {
+	GNAWMONITOR;
 	my $count;
-
-	my $start = $__gnaw__current_element;
-	$count = 100;
-	my $prestring = '';
 
 	# starting from current location,
 	# back up to the beginning of the line.
 	# don't go past 100 characters
 	# and don't go past the beginning marker.
+	my $start = $__gnaw__current_linkedtext_element;
+	$count = 100;
 	while( 	($count--) and  
 		($start ne $__gnaw__head_element) and 
 		($start->[__GNAW__LETTER] ne "\n") 
 	){
 		$start = $start->[__GNAW__PREV];
-		$prestring = $start->[__GNAW__LETTER] . $prestring;
 	}
 
 
-	my $current_character = __gnaw__curr_character();
-
-	my $stop = $__gnaw__current_element;
-	unless($stop eq $__gnaw__tail_element) {
-		$stop = $stop->[__GNAW__NEXT];
-	}
-	$count = 100;
-	my $poststring = '';
-
-	# starting from current location plus one,
+	# starting from current 
 	# move to the end of the line.
 	# don't go past 100 characters
 	# and don't go past the end marker.
+	my $stop = $__gnaw__current_linkedtext_element;
+	$count = 100;
 	while( 	($count--) and  
 		($stop ne $__gnaw__tail_element) and 
 		($stop->[__GNAW__LETTER] ne "\n") 
 	){
 		$stop = $stop->[__GNAW__NEXT];
-		$poststring = $poststring . $stop->[__GNAW__LETTER];
 	}
 
-	my $final_string = 
-		$prestring . ' >HERE> ' . $current_character . ' <HERE< ' . $poststring . "\n";
 
+	# now, go from start to stop marker and print out the elements
+	my $curr = $start;
+	my $final_string='';
+
+	$final_string .= "START\n";
+	$final_string .= "This is the contents of the text linked list for the current line\n";
+	$final_string.= "current element points to ".$__gnaw__current_linkedtext_element."\n";
+
+	my $keepgoing=1;
+
+	while ($keepgoing) {
+		if($curr eq $__gnaw__current_linkedtext_element) {
+			$final_string.= ">";
+		} else {
+			$final_string.= " ";
+		}
+
+		$final_string .= $curr." ";
+
+		if($curr eq $__gnaw__head_element) {
+			$final_string.= "HEAD";
+		} elsif ($curr eq $__gnaw__tail_element){
+			$final_string.= "TAIL";
+		} else {
+			my $letter = $curr->[__GNAW__LETTER];
+			$final_string.= $letter;
+		}
+
+		$final_string.= " : ";
+
+		my $marker_hash_ref = $curr->[__GNAW__LOCATION_MARKERS];
+		my @markers = keys(%$marker_hash_ref);
+		foreach my $marker (@markers) {
+			$final_string.= "$marker ";
+		}
+
+		$final_string.= "\n";
+
+		if($curr eq $stop) {
+			$keepgoing=0;
+		}
+
+		$curr = $curr->[__GNAW__NEXT];
+	}
+
+	$final_string .= "END\n";
 	return $final_string;
 }
 
 
-# what if element being deleted is __gnaw__current_element or 
+# what if element being deleted is __gnaw__current_linkedtext_element or 
 # is a location that some marker is pointing to?
 # need to move all the pointers and markers to the next element in list.
 sub __gnaw__delete_this_element_from_linked_list {
+	GNAWMONITOR;
 	my ($element)=@_;
 
 
@@ -562,11 +633,11 @@ sub __gnaw__delete_this_element_from_linked_list {
 
 
 	# if we are deleting the element that the 
-	# $__gnaw__current_element variable is pointing to
-	# then we need to move the $__gnaw__current_element 
+	# $__gnaw__current_linkedtext_element variable is pointing to
+	# then we need to move the $__gnaw__current_linkedtext_element 
 	# variable forward.
-	if($element eq $__gnaw__current_element) {
-		$__gnaw__current_element = $next_ele;
+	if($element eq $__gnaw__current_linkedtext_element) {
+		$__gnaw__current_linkedtext_element = $next_ele;
 	}
 
 	# if this element has any location markers pointing to it,
@@ -596,6 +667,7 @@ sub __gnaw__delete_this_element_from_linked_list {
 }
 
 sub __gnaw__delete_linked_list_between_two_pointers {
+	GNAWMONITOR;
 	my($start,$stop)=@_;
 
 	my $this = $start;
@@ -615,8 +687,9 @@ sub __gnaw__delete_linked_list_between_two_pointers {
 }
 
 sub __gnaw__delete_linked_list_from_start_to_current_pointer {
+	GNAWMONITOR;
 	__gnaw__delete_linked_list_between_two_pointers
-		($__gnaw__head_element,$__gnaw__current_element);
+		($__gnaw__head_element,$__gnaw__current_linkedtext_element);
 }
 
 
@@ -630,31 +703,131 @@ sub __gnaw__delete_linked_list_from_start_to_current_pointer {
 ####################################################################
 
 our $__gnaw__call_tree 	;
-our $__gnaw__latest_call;
+our $__gnaw__current_calltree_location;
 
 
 sub __gnaw__initialize_call_tree {
+	GNAWMONITOR;
+	my ($status_of_first_call)=@_; # should contain location and descriptor
+
+	unless(defined($status_of_first_call)) {
+		__gnaw__die("called __gnaw__initialize_call_tree without providing a status hashref");
+	}
+
 	$__gnaw__call_tree = {};
-	$__gnaw__latest_call = $__gnaw__call_tree;
+
+	%$__gnaw__call_tree = %$status_of_first_call;
+
+	$__gnaw__current_calltree_location = $__gnaw__call_tree;
 }
 
-__gnaw__initialize_call_tree();
+__gnaw__initialize_call_tree({
+	location=>"in Gnaw.pm, trying to initialize the call tree at 'use' time",
+	descriptor=>'want to initialize it to something just so its defined'}
+);
 
 
-sub __gnaw__current_calltree_location {
-	$_[0] = $__gnaw__latest_call;
+sub __gnaw__get_current_calltree_marker {
+	GNAWMONITOR;
+	# create the marker and initialize it
+	my $markerref = {};
+	$markerref->{pointer_to_tree} = $__gnaw__current_calltree_location;
+	$markerref->{original_calls_deleted}=0;
+
+	# 2) make sure the current call in calltree knows
+	# that the marker we just created is pointing to this call.
+
+	# 2.a) get the hashref of location markers inside current call
+	my $pointers_for_this_call = 
+		$__gnaw__current_calltree_location->{LOCATION_MARKERS};
+
+	# 2.b) the address of our new marker is the hash key 
+	my $markeraddress = $markerref.'';
+
+	# 2.c) put this marker into the current call's hash of markers
+	$pointers_for_this_call->{$markeraddress} = $markerref;
+
+	# return the marker
+	$_[0] = $markerref;	
 }
 
-sub __gnaw__restore_calltree_location {
-	$__gnaw__latest_call = $_[0];
+sub __gnaw__restore_old_calltree_marker {
+	GNAWMONITOR;
+	my($markerref) = @_;
+
+	# if already deleted, something really bad happened.
+	if(exists($markerref->{MARKER_DELETED})) {
+		__gnaw__die("tried to __gnaw__restore_old_calltree_marker with a marker " .
+				"that had already been restored. Need to " . 
+				"__gnaw__get_current_calltree_marker after every restore.");
+	}
+
+	# the marker points to some element in linked list.
+	# set the current_element to whatever the marker points to.
+	$__gnaw__current_calltree_location = $markerref->{pointer_to_tree};
+
+	my $addressofcallincalltreethatmarkerpointsto = $__gnaw__current_calltree_location;
+
+	__gnaw__unlink_old_calltree_marker($markerref);
 }
+
+sub __gnaw__unlink_old_calltree_marker {
+	GNAWMONITOR;
+	my($markerref) = @_;
+
+	# if already deleted, something really bad happened.
+	if(exists($markerref->{MARKER_DELETED})) {
+		__gnaw__die("tried to __gnaw__unlink_old_calltree_marker with a marker " .
+				"that had already been deleted. Need to " . 
+				"__gnaw__get_current_calltree_marker after every restore.");
+	}
+
+	# the marker points to one hash in the call tree.
+	# each hash in calltree contains a hash of location markers.
+	# we want to take the marker, get the hash in call tree, 
+	# then get the location markers for that hash, and delete this marker.
+	# this will allow garbage collection to kick in if needed.
+	# this is also why the user can only restore a marker once,
+	# because once we restore it, we remove it from the calltree.
+
+	my $call_in_calltree = $markerref->{pointer_to_tree};
+
+	# get a reference to the markers for this element
+	my $markers_for_this_call = $call_in_calltree->{LOCATION_MARKERS};
+
+	# get the address, which we will use as the hash key
+	my $markeraddress = $markerref.'';
+
+	# if it doesn't exist, then something went really wrong somewhere.
+	unless(exists($markers_for_this_call->{$markeraddress})) {
+		my $call_address = $call_in_calltree.'';
+
+		__gnaw__die("tried to __gnaw__unlink_old_calltree_marker, but somehow ".
+			"the call in calltree doesn't point to this marker. ".
+			"Marker should point to call, and call should point to marker. ".
+			"Are you experience a memory leak? ".
+			"(markeraddress is '$markeraddress') ".
+			"(call_address is '$call_address')"
+		);
+	}
+
+	delete($markers_for_this_call->{$markeraddress});
+
+	# now tag the user's href so we can catch if they 
+	# use it again without getting a new marker
+	%{$_[0]} = (MARKER_DELETED=>1);
+} 
+
 
 
 sub __gnaw__try_to_parse {
+	GNAWMONITOR;
 	my($subref)=@_;
 
 	$__gnaw__parse_failed=0; 
-	eval { $subref->(); };
+	eval { 
+		$subref->(); 
+	};
 	if($@) {
 		if($__gnaw__parse_failed) {
 			$__gnaw__parse_failed=0; # reset flag before returning
@@ -671,6 +844,7 @@ sub __gnaw__try_to_parse {
 
 
 sub __gnaw__find_location_of_this_subroutine_in_grammar {
+	GNAWMONITOR;
 	my $cnt=0;
 	my @caller=caller($cnt++);
 
@@ -691,37 +865,49 @@ sub __gnaw__find_location_of_this_subroutine_in_grammar {
 		@caller=caller($cnt++);
 	}
 
-	return "I dont know";
+	return "__gnaw__find_location_of_this_subroutine_in_grammar epic fail";
 }
 
 
 
 sub __gnaw__handle_call_tree {
+	GNAWMONITOR;
 	my($ptrtocoderef,$statushash)=@_;
 	my $coderef = $$ptrtocoderef;
-
+	
 	# if we've already been down this path
-	if(exists($__gnaw__latest_call->{$coderef})) {
+	if(exists($__gnaw__current_calltree_location->{$coderef})) {
 		# reuse existing hash pointing to next operation.
-		$__gnaw__latest_call = $__gnaw__latest_call->{$coderef};
+		$__gnaw__current_calltree_location = $__gnaw__current_calltree_location->{$coderef};
 	} else {
 		my $href={};
 		%$href=%$statushash;
-		$href->{previous} = $__gnaw__latest_call;
-		$__gnaw__latest_call->{$coderef} = $href;
-		$__gnaw__latest_call = $href;
+		$href->{previous} = $__gnaw__current_calltree_location;
+		$__gnaw__current_calltree_location->{$coderef} = $href;
+		$__gnaw__current_calltree_location = $href;
+		$href->{LOCATION_MARKERS}={};
+	}
+
+	if(0) {
+		print "DUMPING STATUS EVERY TIME WE CALL __gnaw__handle_call_tree \n";
+		__gnaw__dump_current_call_tree();
+		print __gnaw__string_showing_user_current_location_in_text();
 	}
 }
 
 
 # this will dump the call tree from the current pointer back to the beginning.
 sub __gnaw__dump_current_call_tree {
-	my $command = $__gnaw__latest_call;
+	GNAWMONITOR;
+	
+	print "\n\n\n";
+	print "DUMPING CALL TREE, starting from current location, working back\n";
+	my $command = $__gnaw__current_calltree_location;
 
 	my $counter = 0;
 
 	while(defined($command)) {
-
+		my $stringified_address = $command.'';
 		my $location = $command->{location};
 		my $descriptor = $command->{descriptor};
 
@@ -729,20 +915,28 @@ sub __gnaw__dump_current_call_tree {
 			print "no definition for location\n";
 			$location = '';
 		}
+		$location = chomp($location);
 
 		unless(defined($descriptor)) {
 			print "no definition for descriptor\n";
 			$descriptor = '';
 		}
 
+		my $call_markers = '';
+		if(exists($command->{LOCATION_MARKERS})) {
+			my @marker_names = keys(%{$command->{LOCATION_MARKERS}});
+			$call_markers = join (' ', @marker_names);
+			
+		}
 
-
-		print "$counter : $descriptor @ $location\n";
+		print "$counter $stringified_address : $descriptor @ $location :: call_markers($call_markers)\n";
 
 		$command = $command->{previous};
 
 		$counter++;
 	}
+	print "end of __gnaw__dump_current_call_tree\n";
+	print "\n\n\n";
 }
 
 
@@ -760,6 +954,7 @@ sub __gnaw__dump_current_call_tree {
 
 
 sub __gnaw__check_all_coderefs {
+	GNAWMONITOR;
 	my @elements=@_;
 	unless(scalar(@_)>0) {
 		__gnaw__die("no elements to process");
@@ -791,25 +986,39 @@ This is equivalent to the "m" part of a perl regexp of $string\=~m//.  The match
 =cut
 
 sub match {
+	GNAWMONITOR;
 	__gnaw__check_all_coderefs(@_);
 	my (@coderefs)=@_;
+
+	my $status = {};
+	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
+	$status->{location} = $location;
+	$status->{descriptor} = 'match';
+
 	return sub{
+		GNAWMONITOR('match');
 		my ($string_to_match)=@_;
 		__gnaw__initialize_string_to_parse($string_to_match);
- 		return __gnaw__match(@coderefs);
+ 		return __gnaw__match($status, @coderefs);
 	};
 }
 
 sub __gnaw__match {
+	GNAWMONITOR;
+	my $status=shift(@_);
 	my @coderefs = @_;
 
 	until( __gnaw__at_end_of_string() ) {
-		__gnaw__initialize_call_tree();
+
+		__gnaw__initialize_call_tree($status);
 
 		my $position;
 		__gnaw__get_current_text_marker($position);
 
-		my $sub = sub { __gnaw__series(@coderefs) };
+		my $sub = sub{ 
+			GNAWMONITOR('matchseries');
+			__gnaw__series(@coderefs) 
+		};
 
 		if(__gnaw__try_to_parse($sub)) {
 			# DONE!
@@ -844,6 +1053,7 @@ The "series" function returns a coderef that is used in part of a larger grammar
 =cut
 
 sub series {
+	GNAWMONITOR;
 	__gnaw__check_all_coderefs(@_);
 	my (@coderefs)=@_;
 
@@ -855,6 +1065,7 @@ sub series {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('series');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
 		__gnaw__series(@coderefs);
 	};
@@ -863,6 +1074,7 @@ sub series {
 
 
 sub __gnaw__series {
+	GNAWMONITOR;
 	foreach my $coderef (@_) {
 		$coderef->();
 	}
@@ -888,6 +1100,7 @@ The "lit" function returns a coderef that is used in part of a larger grammar.
 =cut
 
 sub lit {
+	GNAWMONITOR;
 	my ($literal)=shift(@_);
 
 	my $status = {};
@@ -898,6 +1111,7 @@ sub lit {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('litoperation');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
 		__gnaw__lit($literal);
 	};
@@ -905,6 +1119,7 @@ sub lit {
 }
 
 sub __gnaw__lit {
+	GNAWMONITOR;
 	my ($lit)=@_;
 	my @literal_characters = split(//, $lit);
 
@@ -918,6 +1133,7 @@ sub __gnaw__lit {
 
 
 sub __gnaw__convert_character_class_string_into_hash_ref {
+	GNAWMONITOR;
 	my ($characterset)=@_;
 
 	my @chars = split(//, $characterset);
@@ -976,6 +1192,7 @@ The "set" function returns a coderef that is used in part of a larger grammar.
 # I'd use the subroutine name "class" for character classes,
 # but "class" is already a perl keyword. I hope "set" isn't.
 sub set { 
+	GNAWMONITOR;
 	my ($characterset)=@_;
 
 	my $char_set_hash_ref = 
@@ -990,6 +1207,7 @@ sub set {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('setoperation');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
 		__gnaw__set($char_set_hash_ref);
 	};
@@ -999,6 +1217,7 @@ sub set {
 
 
 sub __gnaw__set {
+	GNAWMONITOR;
 	my ($char_set_hash_ref)=@_;
 
 	my $curr_char = __gnaw__next_character();
@@ -1030,6 +1249,7 @@ The "set_n" function returns a coderef that is used in part of a larger grammar.
 =cut
 
 sub set_n {
+	GNAWMONITOR;
 	my ($characterset)=@_;
 
 	my $char_set_hash_ref = 
@@ -1047,6 +1267,7 @@ sub set_n {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('set_noperation');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
 		__gnaw__set_n($char_set_hash_ref);
 	};
@@ -1056,6 +1277,7 @@ sub set_n {
 
 
 sub __gnaw__set_n {
+	GNAWMONITOR;
 	my ($char_set_hash_ref)=@_;
 
 	my $curr_char = __gnaw__next_character();
@@ -1164,6 +1386,7 @@ The "alternation" function returns a coderef that is used in part of a larger gr
 =cut
 
 sub alternation {
+	GNAWMONITOR;
 	__gnaw__check_all_coderefs(@_);
 
 	my @alternates = @_;
@@ -1176,6 +1399,7 @@ sub alternation {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('alternationcommand');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
 		__gnaw__alternation(@alternates);
 	};
@@ -1184,29 +1408,30 @@ sub alternation {
 
 
 sub __gnaw__alternation {
+	GNAWMONITOR;
 	my $text_marker_at_start_of_alternation;
 
 	my $location_of_alternation_on_call_tree;
 
-	__gnaw__current_calltree_location($location_of_alternation_on_call_tree);
 
 	# try each alternate
 	foreach my $alternate (@_) {
 
+		__gnaw__get_current_calltree_marker($location_of_alternation_on_call_tree);
 		__gnaw__get_current_text_marker($text_marker_at_start_of_alternation);
 
 		# if it works, then return
 		if(__gnaw__try_to_parse($alternate) == 1) {
 			# need to garbage collect the marker
-			__gnaw__unlink_old_marker($text_marker_at_start_of_alternation);
+			__gnaw__unlink_old_text_marker($text_marker_at_start_of_alternation);
+			__gnaw__unlink_old_calltree_marker($location_of_alternation_on_call_tree);
 
 			return;
 		}
 
 		# else go back to where alternation started and try next alternation
 		__gnaw__restore_old_text_marker($text_marker_at_start_of_alternation);
-
-		__gnaw__restore_calltree_location( $location_of_alternation_on_call_tree );
+		__gnaw__restore_old_calltree_marker( $location_of_alternation_on_call_tree );
 	}
 
 	# if no alternate worked, then alternation failed.
@@ -1216,6 +1441,7 @@ sub __gnaw__alternation {
 
 
 sub __gnaw__numeric_check {
+	GNAWMONITOR;
 	my ($ptrtonumtocheck)=@_;
 
 	my $numtocheck = $$ptrtonumtocheck;
@@ -1249,7 +1475,7 @@ The "quantifier" function is a gnaw grammar component which receives a single gr
 
 quantifier( thrifty_or_greedy , single_grammar_component , minimum , maximum );
 
-The thrifty_or_greedy parameter is a 't' or a 'g' to indicate whether the single command is applied as a thrifty or greedy quantifier. It is an optional parameter and may be skipped.
+The thrifty_or_greedy parameter is a 't' or a 'g' to indicate whether the single command is applied as a thrifty or greedy quantifier. It is an optional parameter and may be skipped. If no thrifty_or_greedy parameter is provided, the quantifier will assume greedy.
 
 The single_grammar_component is a single gnaw grammar component. If the quantifier is to be applied to more than one command in a series, either bundle those commands up in a series() function or bundle them up in a named subroutine that can act as a separate rule.
 
@@ -1290,6 +1516,7 @@ The "quantifier" function returns a coderef that is used in part of a larger gra
 =cut
 
 sub quantifier{
+	GNAWMONITOR;
 
 	# my($thrifty_greedy, $operation, $min, $max)=@_;
 	#
@@ -1366,19 +1593,28 @@ sub quantifier{
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('quantifieroperation');
 
 		# whenever we start a regexp, set "try" to "try_init".
 		# whenever a regexp fails, see if try==done, if not,
 	 	# then add incrementor to "try" and retry.
 		my $status = {
 			quantifier => 1,
-			min => $min,
-			max => $max,
 			operation => $operation, # just for record keeping
 		};
 
 		$status->{location} = $location;
 		$status->{descriptor} = $descriptor;
+
+		# note that we're going to attach some quantifier data to this hash 
+		# this will allow quantifer to figure out how many times to try a command.
+		# if we fail, but come back to this place in teh call tree, we can try
+		# a different value.
+		# this means that when we do a "commit", we might have to figure out a 
+		# way to keep certain quantifiers around in the call tree.
+		
+		$status->{min} = $min;
+		$status->{max} = $max;
 
 		if($thrifty_greedy eq 't') {
 			$status->{incrementor} = (+1);
@@ -1420,10 +1656,10 @@ sub greedy{
 }
 
 sub __gnaw__quantifier {
+	GNAWMONITOR;
 	my($operation)=@_;
 
-	my $quantifier_hash;
-	__gnaw__current_calltree_location($quantifier_hash);
+	my $quantifier_hash = $__gnaw__current_calltree_location;
 
 	my $try = $quantifier_hash->{try};
 
@@ -1441,7 +1677,22 @@ sub __gnaw__quantifier {
 		}
 	}
 
+	# get markers for start of entire quantifier command
+	my $text_marker_at_start_of_quantifier_command;
+	my $call_marker_at_start_of_quantifier_command;
+	__gnaw__get_current_text_marker($text_marker_at_start_of_quantifier_command);
+	__gnaw__get_current_calltree_marker($call_marker_at_start_of_quantifier_command);
+
+
+	# get markers for start of this iteration
+	my $text_marker_at_last_passing_iteration;
+	my $call_marker_at_last_passing_iteration;
+	__gnaw__get_current_text_marker($text_marker_at_last_passing_iteration);
+	__gnaw__get_current_calltree_marker($call_marker_at_last_passing_iteration);
+
 	my $cnt;
+	my $successes;
+
 	# try the sub as many times as hashinfo says to try.
 	# if we try it 7 times and it works, then it fails on the 8th try,
 	# then set the marker to the end of the 7th try and set the 
@@ -1449,26 +1700,16 @@ sub __gnaw__quantifier {
 	# (use short circuit OR to prevent evaluation of an undefined 'try' value)
 	for($cnt=1; ($openended or ($cnt<=$try)); $cnt++) {
 
-		# save current location
-		my $text_marker_at_start_of_quantifier_attempt;
-		__gnaw__get_current_text_marker($text_marker_at_start_of_quantifier_attempt);
-		my $location_on_call_tree;
-		__gnaw__current_calltree_location($location_on_call_tree);
-
-
-
 		# try the subroutine
-		# if it failed
+		# if this iteration failed
 		if(__gnaw__try_to_parse($operation) == 0) {
 
-			# failed, restore call tree to last success
-			__gnaw__restore_calltree_location( $location_on_call_tree );
+			# cnt variable is always one ahead
+			$successes = $cnt-1;
 
-
-			# if the number of successes isn't within min,max
-			# then this quantifier failed
-			my $successes = $cnt-1;
-
+			# in case something fails after this,
+			# record how many times to try next time we come here
+			$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
 
 			# if we're below the minimum
 			# or if there is a defined maximum (not a "1 or greater" quantifier)
@@ -1481,25 +1722,44 @@ sub __gnaw__quantifier {
 					($successes > $quantifier_hash->{max}) 
 				) 
 			) { 
+				# we're either too many or not enough. This "try" failed.
+
+				# remove the iteration links, we won't need them
+				__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
+				__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
+
+				# quantifier failed, go back to very beginning
+				__gnaw__restore_old_text_marker( $text_marker_at_start_of_quantifier_command );
+				__gnaw__restore_old_calltree_marker( $call_marker_at_start_of_quantifier_command );
+
 				__gnaw__parse_failed(); # throws an exception
+			} else {
+
+				# the number of successes are within acceptable min/max range.
+				# ignore this last failure and set marker back to last successful location
+				__gnaw__restore_old_text_marker( $text_marker_at_last_passing_iteration );
+				__gnaw__restore_old_calltree_marker( $call_marker_at_last_passing_iteration );
+
+				# we don't need the beginning markers either, unlink them too.
+				__gnaw__unlink_old_text_marker($text_marker_at_start_of_quantifier_command);
+				__gnaw__unlink_old_calltree_marker($call_marker_at_start_of_quantifier_command);
+
+				# eject from the loop, return immediately, and allow the next command to take place.
+				return;
 			}
+		} else {
 
-			# the number of successes are within acceptable min/max range.
-			# set marker back to last successful location
-			__gnaw__restore_old_text_marker
-				($text_marker_at_start_of_quantifier_attempt);
-			# in case something fails after this,
-			# record how many times to try next time we come here
-			$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
+			# else tried and succeeded.
+			# need to garbage collect the markers
+			__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
+			__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
 
-			# good enough for now, let the rest of the grammar
-			# operate so we can find out if it passed too.
-			return;
+			# since this iteration passed, update the markers to point to here
+			__gnaw__get_current_text_marker($text_marker_at_last_passing_iteration);
+			__gnaw__get_current_calltree_marker($call_marker_at_last_passing_iteration);
+
 		}
 
-		# else tried and succeeded.
-		# need to garbage collect the marker.
-		__gnaw__unlink_old_marker($text_marker_at_start_of_quantifier_attempt);
 
 	} 
 
@@ -1507,9 +1767,19 @@ sub __gnaw__quantifier {
 	# in case something fails after this,
 	# record how many times to try next time we come here
 	# note that "$try" might be undefined, but "$cnt" should always be defined.
-	$quantifier_hash->{try} = ($cnt-1) + $quantifier_hash->{incrementor};
 
-	return;
+	# cnt variable is always one ahead
+	$successes = $cnt-1;
+	$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
+
+	# now delete the original markers since we shouldn't need them anymore.
+	__gnaw__unlink_old_text_marker($text_marker_at_start_of_quantifier_command);
+	__gnaw__unlink_old_calltree_marker($call_marker_at_start_of_quantifier_command);
+
+	# delete these too
+	__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
+	__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
+
 }
 
 
@@ -1540,6 +1810,7 @@ Note that "callback" is a scheduled call and only makes the actual call when gra
 =cut
 
 sub callback {
+	GNAWMONITOR;
 	my ($callback_coderef)=@_;
 
 	unless(ref($callback_coderef) eq 'CODE') {
@@ -1551,6 +1822,7 @@ sub callback {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('callbackoperation');
 		my $status = {
 			callback => $callback_coderef,
 		};
@@ -1579,7 +1851,7 @@ The callback will receive a copy of the string containing whatever was captured 
 
 
 	# capture the first "a" we find.
-	my $grammar = match(capture(lit('a', $capture_callback));
+	my $grammar = match(capture(lit('a'), $capture_callback)));
 
 	# this will not match, the capture callback will not be called.
 	$grammar->('xxxxx');
@@ -1592,6 +1864,7 @@ Note that "capture" creates a scheduled call and only makes the actual call when
 =cut
 
 sub capture {
+	GNAWMONITOR;
 	my ($gnaw_coderef, $callback_coderef)=@_;
 
 	unless(ref($gnaw_coderef) eq 'CODE') {
@@ -1607,6 +1880,7 @@ sub capture {
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('captureoperation');
 		my $status = {
 			capture => 1,
 			callback => $callback_coderef,
@@ -1629,10 +1903,10 @@ sub capture {
 
 
 sub __gnaw__capture {
+	GNAWMONITOR;
 	my ($gnaw_coderef, $callback_coderef)=@_;
 
-	my $capture_hash;
-	__gnaw__current_calltree_location($capture_hash);
+	my $capture_hash = $__gnaw__current_calltree_location;
 
 	# the next rule might skip some white space, if "skip" says to do that.
 	# if "skip" says to skip anything, then we don't want to capture it.
@@ -1656,10 +1930,10 @@ sub __gnaw__capture {
 # don't call this unless you've either (1) successfully parsed the whole input text or
 # (2) the parser did a "commit" and the call tree must be correct
 sub __gnaw__execute_callbacks_in_call_tree {
+	GNAWMONITOR;
 	#__gnaw__dump_current_call_tree();
 
-	my $command;
-	__gnaw__current_calltree_location($command);
+	my $command = $__gnaw__current_calltree_location;
 
 	my $callback;
 	my $counter = 0;
@@ -1680,8 +1954,8 @@ sub __gnaw__execute_callbacks_in_call_tree {
 			$callback->($string, $start_pointer, $stop_pointer);
 
 			# unlink the markers so they can be garbage collected.
-			__gnaw__unlink_old_marker($start_marker);
-			__gnaw__unlink_old_marker($stop_marker);
+			__gnaw__unlink_old_text_marker($start_marker);
+			__gnaw__unlink_old_text_marker($stop_marker);
 
 		} elsif (exists($command->{callback})) {
 			print "found user callback on call tree at counter '$counter'\n";
@@ -1725,11 +1999,13 @@ The "commit" function also causes a number of things to occur behind the scenes 
 
 sub commit {
 
+	GNAWMONITOR;
 	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
 
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
+		GNAWMONITOR('commitoperation');
 		my $status = {
 			commit => 1,
 		};
@@ -1746,9 +2022,10 @@ sub commit {
 
 
 sub __gnaw__commit {
+	GNAWMONITOR;
 	#__gnaw__dump_current_call_tree();
 	__gnaw__execute_callbacks_in_call_tree();
-	__gnaw__initialize_call_tree();
+	__gnaw__initialize_call_tree( {location=>'commit', descriptor=>'commit'} );
 	__gnaw__delete_linked_list_from_start_to_current_pointer();
 }
 

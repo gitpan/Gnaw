@@ -92,7 +92,7 @@ ok( $string eq '', "check capture 6.2");
 $grammar = match(capture(quantifier(lit('a'), '*'), $callback));
 $string = '';
 ok( 1==$grammar->('abcdefaaaaahjklm'), "match 7.1");
-ok( $string eq '', "check capture 7.1");
+ok( $string eq 'a', "check capture 7.1");
 
 
 $string = '';
