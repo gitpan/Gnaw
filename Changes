@@ -61,4 +61,34 @@ numbers through the flow. Argh.
 oh, and put hardreturns into the readme.
 
 
+0.07	22 Oct 2008
+
+Oh my head. Massive rewrite. The calltree was conceptually totally wrong.
+Changed call tree from a tree to a stack. No longer keep different branches
+around. 
+
+Multiple quantifiers now work together. The following grammar now works:
+
+$grammar = 
+	match(
+		series( 
+			capture(greedy(lit('x'),'s'),$first_callback), 
+			capture(greedy(lit('x'),'s'),$second_callback)
+		)
+	);
+
+$grammar->('xxxxx')
+
+
+The first greedy will swallow the entire string, then release one character.
+This will allow second greedy to match on the last x, and the entire
+grammar passes.
+
+first capture eq 'xxxx'.
+second capture eq 'x'
+
+The commit function doesn't work with quantifiers yet.
+Changed the commit test to use a long series of lits instead.
+all tests now pass. However, there are some known bugs that
+don't have tests for them.
 

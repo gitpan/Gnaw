@@ -13,4 +13,7 @@ WriteMakefile(
     },
     dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean               => { FILES => 'Gnaw-*' },
+
+    ($ExtUtils::MakeMaker::VERSION >= 6.3002 ?
+          ('LICENSE'		=> 'perl', ) : ()),
 );

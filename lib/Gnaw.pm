@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.05
+Version 0.07
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.05';
+our $VERSION = '0.07';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -74,27 +74,33 @@ use warnings;
 use strict;
 use Data::Dumper; 
 
+# declare this now so we can use it in the "parse fail" sub
+our %__gnaw__quantifier_callbacks_by_type;
+
+our $GNAWDEBUG=0;
+
 sub GNAWMONITOR {}
 
-sub GNAWMONITOR_0 {
+sub GNAWMONITOR_0  {
 	print "MONITOR: "; 
 
 	# if user passes in a message, print it
 	if(scalar(@_)){
 		my $str=shift(@_);
-		print $str;
+		chomp($str);
+		print $str." ";
 	} 
 
 	# print the name of the subroutine that called MONITOR
 	my $subname = (caller(1))[3];
-	print $subname;
+	print $subname." ";
 	my $linenum = (caller(1))[2];
 
 	# print the name of the subroutine that called this subroutine
 	print " called from ";
 	my $calledfrom = (caller(2))[3];
 	unless(defined($calledfrom)) {
-		$calledfrom = '(no one?)';
+		$calledfrom = '(no one?) ';
 	}
 	print $calledfrom." ";
 
@@ -139,27 +145,104 @@ sub __gnaw__die {
 }
 
 
+our $__gnaw__current_calltree_location;
+our $__gnaw__call_tree 	;
+
+sub __gnaw__initialize_call_tree {
+	GNAWMONITOR;
+
+	if(scalar(@_)) {
+		__gnaw__die("called __gnaw__initialize_call_tree with status hash which is no longer used.");
+	}
+
+	$__gnaw__call_tree = {
+		location => "__gnaw__initialize_call_tree",
+		descriptor => "__gnaw__initialize_call_tree",
+	};
+
+	$__gnaw__current_calltree_location = $__gnaw__call_tree;
+}
+
+__gnaw__initialize_call_tree();
+
 
 our $__gnaw__parse_failed;
 
 sub __gnaw__parse_failed {
-	GNAWMONITOR;
+	GNAWMONITOR( "__gnaw__parse_failed BEGINNING\n" );
+	GNAWMONITOR( __gnaw__dump_current_call_tree () );
+
+	# from current position in call tree, work our way back.
+	# if we run into a quantifier, calculate next try value.
+	# if that calculation causes an overflow, go back to 
+	# next quantifier and calculate new try value.
+	# if that causes overflow, go back to next quantifer...
+	# and so on.
+	#
+	# if we hit first call in list, then we cant do any more
+	# quantifiers and we really did fail.
+	
+	my $looking_for_quantifier_to_calculate_new_try=1;
+	my $command = $__gnaw__current_calltree_location;
+
+	my @list_of_owners_who_have_been_told_to_retry;
+
+	GNAWMONITOR( "__gnaw__parse_failed internal: just before while loop");
+	while(defined($command) and $looking_for_quantifier_to_calculate_new_try) {
+		GNAWMONITOR( "__gnaw__parse_failed internal: just inside while loop");
+
+		if(exists($command->{quantifier})) {
+			GNAWMONITOR( "__gnaw__parse_failed internal: command is quantifier");
+			my $quantifier_type = $command->{quantifier_type};
+			my $quantifier_callbacks = $__gnaw__quantifier_callbacks_by_type{$quantifier_type};
+			my $rolled_over = $quantifier_callbacks->{calculate_try}->($command);
+
+			GNAWMONITOR( "__gnaw__parse_failed internal: rolled_over = $rolled_over");
+
+			# if it didnt roll over, we can stop looking
+			if($rolled_over==0) {
+				$looking_for_quantifier_to_calculate_new_try=0;
+				GNAWMONITOR( "__gnaw__parse_failed internal: didn't rollover, stop looking");
+
+				# tell the call that owns this quantifier to try another quantifier run
+				my $quantifier_owner = $command->{quantifier_owner};
+				unless(defined($quantifier_owner)) {
+					__gnaw__die("no quantifier_owner defined for this quantifier");
+				}
+				$quantifier_owner->{try_another_quantifier_run}=1;
+
+				push(@list_of_owners_who_have_been_told_to_retry, $quantifier_owner);
+			}
+		} else {
+			GNAWMONITOR( "__gnaw__parse_failed internal: command is not quantifier");
+		}
+
+		if(exists($command->{previous})){
+			$command = $command->{previous};
+		} else {
+			$command = undef;
+		}
+	}
+
+	# if command is not defined (hit end of call tree) but still "looking" for quantifier
+	# then all the quantifiers rolled over, which means we shouldn't actually try another run
+	if( (not(defined($command))) and ($looking_for_quantifier_to_calculate_new_try==1)) {
+		GNAWMONITOR ("__gnaw__parse_failed internal: ALL QUANTIFIERS ROLLED OVER, DONT TRY");
+		foreach my $owner (@list_of_owners_who_have_been_told_to_retry) {
+			$owner->{try_another_quantifier_run}=0;
+		}
+	}
+
 	$__gnaw__parse_failed=1;
 
-	if(0) {
-		print "\n\n\n__gnaw__parse_failed START DUMP\n";
-		print __gnaw__where_in_code();
-		print __gnaw__string_showing_user_current_location_in_text();
-		print "\n__gnaw__parse_failed END DUMP\n\n\n";
-	}
+	GNAWMONITOR (  "__gnaw__parse_failed ENDING\n" );
+	GNAWMONITOR (  "\n\n\n__gnaw__parse_failed START DUMP\n" );
+	GNAWMONITOR (  __gnaw__where_in_code() );
+	GNAWMONITOR (  __gnaw__string_showing_user_current_location_in_text() );
+	GNAWMONITOR (  __gnaw__dump_current_call_tree() );
+	GNAWMONITOR (  "\n__gnaw__parse_failed END DUMP\n\n\n" );
 
 	my $message = "__gnaw__parse_failed ";
-
-	if(0) {	# change this to a 1 for dumping trace info.
-		$message .= "\n";
-		$message .= __gnaw__where_in_code();
-		$message .= __gnaw__string_showing_user_current_location_in_text();
-	}
 
 	die $message;
 }
@@ -620,6 +703,7 @@ sub __gnaw__string_showing_user_current_location_in_text {
 }
 
 
+
 # what if element being deleted is __gnaw__current_linkedtext_element or 
 # is a location that some marker is pointing to?
 # need to move all the pointers and markers to the next element in list.
@@ -702,30 +786,6 @@ sub __gnaw__delete_linked_list_from_start_to_current_pointer {
 ####################################################################
 ####################################################################
 
-our $__gnaw__call_tree 	;
-our $__gnaw__current_calltree_location;
-
-
-sub __gnaw__initialize_call_tree {
-	GNAWMONITOR;
-	my ($status_of_first_call)=@_; # should contain location and descriptor
-
-	unless(defined($status_of_first_call)) {
-		__gnaw__die("called __gnaw__initialize_call_tree without providing a status hashref");
-	}
-
-	$__gnaw__call_tree = {};
-
-	%$__gnaw__call_tree = %$status_of_first_call;
-
-	$__gnaw__current_calltree_location = $__gnaw__call_tree;
-}
-
-__gnaw__initialize_call_tree({
-	location=>"in Gnaw.pm, trying to initialize the call tree at 'use' time",
-	descriptor=>'want to initialize it to something just so its defined'}
-);
-
 
 sub __gnaw__get_current_calltree_marker {
 	GNAWMONITOR;
@@ -765,8 +825,6 @@ sub __gnaw__restore_old_calltree_marker {
 	# the marker points to some element in linked list.
 	# set the current_element to whatever the marker points to.
 	$__gnaw__current_calltree_location = $markerref->{pointer_to_tree};
-
-	my $addressofcallincalltreethatmarkerpointsto = $__gnaw__current_calltree_location;
 
 	__gnaw__unlink_old_calltree_marker($markerref);
 }
@@ -824,22 +882,68 @@ sub __gnaw__try_to_parse {
 	GNAWMONITOR;
 	my($subref)=@_;
 
+	my $call_at_start_of_try = $__gnaw__current_calltree_location;
+
+	# we will try to parse command from current location
+	# if it fails, but there is another quantifier combination to try,
+	# then go back to start location and try again.
+	# need to keep track of location at start of try.
+	my $location_on_call_tree_at_start_of_try;
+	my $location_on_text_list_at_start_of_try;
+
 	$__gnaw__parse_failed=0; 
-	eval { 
-		$subref->(); 
-	};
-	if($@) {
-		if($__gnaw__parse_failed) {
-			$__gnaw__parse_failed=0; # reset flag before returning
-			return 0;
-		} else {
-			# died, but gnaw didn't fail. something else went wrong
-			__gnaw__die $@;
-		}
-	} else {
-		# didn't die, must have succeeded.
-		return 1;
+	my $keeplooking=1;
+
+	if(exists($call_at_start_of_try->{try_another_quantifier_run})) {
+		  $call_at_start_of_try->{try_another_quantifier_run}=0;
 	}
+
+	while( $keeplooking ) {
+		GNAWMONITOR ("TRYTOPARSE:__gnaw__try_to_parse while loop ");
+		__gnaw__get_current_text_marker    ($location_on_text_list_at_start_of_try);
+		__gnaw__get_current_calltree_marker($location_on_call_tree_at_start_of_try);
+
+		eval { 
+			$subref->(); 
+		};
+
+		if($@) {
+			if($__gnaw__parse_failed) {
+				GNAWMONITOR("TRYTOPARSE:failed ");
+				__gnaw__restore_old_text_marker		($location_on_text_list_at_start_of_try);
+				__gnaw__restore_old_calltree_marker	($location_on_call_tree_at_start_of_try);
+
+				$__gnaw__parse_failed=0; # reset flag before returning
+
+				if(exists($call_at_start_of_try->{try_another_quantifier_run}) and
+					 ($call_at_start_of_try->{try_another_quantifier_run}==1)
+				) {
+					# then want to drop through to while loop again
+					GNAWMONITOR("TRYTOPARSE:try_another_quantifier_run=1 ");
+				} else {
+					# else last eval failed and there are no quantifier runs to attempt. 
+					# overall result is fail.
+					GNAWMONITOR("TRYTOPARSE:try_another_quantifier_run=0 ");
+					return 0;
+				}
+			} else {
+				# died, but gnaw didn't fail. something else went wrong
+				GNAWMONITOR("TRYTOPARSE:plain die ");
+				__gnaw__die $@;
+			}
+		} else {
+			# didn't die, must have succeeded.
+			GNAWMONITOR("TRYTOPARSE:success ");
+			__gnaw__unlink_old_text_marker		($location_on_text_list_at_start_of_try);
+			__gnaw__unlink_old_calltree_marker	($location_on_call_tree_at_start_of_try);
+			return 1;
+		}
+	}
+
+	if(exists($call_at_start_of_try->{try_another_quantifier_run})) {
+		$keeplooking = $call_at_start_of_try->{try_another_quantifier_run};
+	}
+
 }
 
 
@@ -869,30 +973,95 @@ sub __gnaw__find_location_of_this_subroutine_in_grammar {
 }
 
 
+# use "local" to always point to the current "series" command.
+# "series" will localize this variable then assign it to the call element of the series.
+# if  __gnaw__handle_call_tree  gets called to handle a quantifier,
+# and that quantifier is not in the call tree, then that quantifier
+# needs to be assigned to the series element. This will then allow the series element
+# to decide if it needs to alter the quantifier "try" values and try the series again
+# or if the quantifiers within the series have been exhausted, and the series fails.
+our $__gnaw__current_quantifier_owner;
+
 
 sub __gnaw__handle_call_tree {
 	GNAWMONITOR;
 	my($ptrtocoderef,$statushash)=@_;
 	my $coderef = $$ptrtocoderef;
-	
+
+	my $this_stringified_address = $coderef.'';
+	my $next_stringified_address = '';
+
+	if(exists($__gnaw__current_calltree_location->{try_another_quantifier_run})) {
+		  $__gnaw__current_calltree_location->{try_another_quantifier_run}=0;
+	}
+ 
+	if(exists($__gnaw__current_calltree_location->{next})) {
+		$next_stringified_address = $__gnaw__current_calltree_location->{next}->{coderef};
+	}
+
 	# if we've already been down this path
-	if(exists($__gnaw__current_calltree_location->{$coderef})) {
+	if($this_stringified_address eq $next_stringified_address) {
 		# reuse existing hash pointing to next operation.
-		$__gnaw__current_calltree_location = $__gnaw__current_calltree_location->{$coderef};
+		$__gnaw__current_calltree_location = $__gnaw__current_calltree_location->{next};
 	} else {
+		# either never gone this far before or this is a new path
+		# see if an old path exists, if so, it must be an old path
+		# that we won't be using anymore, delete it.
+		if(exists($__gnaw__current_calltree_location->{next})) {
+			my $oldpath = $__gnaw__current_calltree_location->{next};
+			__gnaw__delete_call_tree_from_here_to_end($oldpath);
+		}
+
 		my $href={};
 		%$href=%$statushash;
 		$href->{previous} = $__gnaw__current_calltree_location;
-		$__gnaw__current_calltree_location->{$coderef} = $href;
+		$__gnaw__current_calltree_location->{next} = $href;
 		$__gnaw__current_calltree_location = $href;
 		$href->{LOCATION_MARKERS}={};
+		$href->{coderef}=$this_stringified_address;
 	}
 
-	if(0) {
-		print "DUMPING STATUS EVERY TIME WE CALL __gnaw__handle_call_tree \n";
-		__gnaw__dump_current_call_tree();
-		print __gnaw__string_showing_user_current_location_in_text();
+	if(exists($__gnaw__current_calltree_location->{quantifier})) {
+		$__gnaw__current_calltree_location->{quantifier_owner} = $__gnaw__current_quantifier_owner;
 	}
+
+	if(exists($__gnaw__current_calltree_location->{try_another_quantifier_run})) {
+		  $__gnaw__current_calltree_location->{try_another_quantifier_run}=0;
+	}
+
+	GNAWMONITOR (   "DUMPING STATUS EVERY TIME WE CALL __gnaw__handle_call_tree \n" );
+	GNAWMONITOR (  __gnaw__dump_current_call_tree() );
+	GNAWMONITOR (  __gnaw__string_showing_user_current_location_in_text() );
+	GNAWMONITOR (   "\n\n\n" );
+}
+
+sub __gnaw__delete_call_tree_from_here_to_end {
+	my($startelement)=@_;
+
+	my $this = $startelement;
+	my $next;
+
+	while(defined($this)) {
+
+		# delete any call tree markers stored in this element
+		my $markers = $this->{LOCATION_MARKERS};
+		while(my($markeraddr,$markerref)=each(%$markers)) {
+			__gnaw__unlink_old_calltree_marker($markerref);
+		}
+
+		# get the next hash, if there is one
+		$next = undef;
+		if(exists($this->{next})) {
+			$next=$this->{next};
+		}
+
+		# delete everything in this hash
+		%$this=();		
+
+		# get ready for next iteration
+		$this=$next;
+	}
+
 }
 
 
@@ -900,8 +1069,8 @@ sub __gnaw__handle_call_tree {
 sub __gnaw__dump_current_call_tree {
 	GNAWMONITOR;
 	
-	print "\n\n\n";
-	print "DUMPING CALL TREE, starting from current location, working back\n";
+	my $string = "\n\n\n";
+	$string.= "DUMPING CALL TREE, starting from current location, working back\n";
 	my $command = $__gnaw__current_calltree_location;
 
 	my $counter = 0;
@@ -910,16 +1079,26 @@ sub __gnaw__dump_current_call_tree {
 		my $stringified_address = $command.'';
 		my $location = $command->{location};
 		my $descriptor = $command->{descriptor};
+		my $coderefstr = $command->{coderef};
 
 		unless(defined($location)) {
-			print "no definition for location\n";
+			$string.= "no definition for location\n";
 			$location = '';
 		}
 		$location = chomp($location);
 
 		unless(defined($descriptor)) {
-			print "no definition for descriptor\n";
+			$string.= "no definition for descriptor\n";
 			$descriptor = '';
+		}
+
+		unless(defined($coderefstr)) {
+			$coderefstr='coderef?';
+		}
+
+		my $qrun='';
+		if(exists($command->{try_another_quantifier_run})) {
+			$qrun = " try_another_quantifier_run = ". $command->{try_another_quantifier_run};
 		}
 
 		my $call_markers = '';
@@ -929,14 +1108,31 @@ sub __gnaw__dump_current_call_tree {
 			
 		}
 
-		print "$counter $stringified_address : $descriptor @ $location :: call_markers($call_markers)\n";
+		$string.= "$counter $stringified_address : $coderefstr : $descriptor at $location :: $qrun :: call_markers($call_markers)\n";
+
+		if(exists($command->{quantifier})) {
+			my $min = $command->{min};
+			my $max = $command->{max};
+			unless(defined($max)) { $max='undef'; }
+			my $try = $command->{try};
+			unless(defined($try)) { $try='undef'; }
+			my $successes = $command->{successes};
+			unless(defined($successes)) { $successes='undef'; }
+			my $rollover= $command->{rollover};
+			unless(defined($rollover)){$rollover='undef';}
+			my $owner = $command->{quantifier_owner};
+			$string.= " quantifier dump {min=$min, max=$max, try=$try, successes=$successes, rollover=$rollover } [owner=$owner] \n";
+
+		}
 
 		$command = $command->{previous};
 
 		$counter++;
 	}
-	print "end of __gnaw__dump_current_call_tree\n";
-	print "\n\n\n";
+	$string.= "end of __gnaw__dump_current_call_tree\n";
+	$string.= "\n\n\n";
+
+	return $string;
 }
 
 
@@ -995,44 +1191,40 @@ sub match {
 	$status->{location} = $location;
 	$status->{descriptor} = 'match';
 
-	return sub{
+	my $coderef;
+	my $ptrtocoderef=\$coderef;
+	$coderef = sub{
 		GNAWMONITOR('match');
-		my ($string_to_match)=@_;
+		my $string_to_match = shift(@_);
 		__gnaw__initialize_string_to_parse($string_to_match);
- 		return __gnaw__match($status, @coderefs);
-	};
-}
-
-sub __gnaw__match {
-	GNAWMONITOR;
-	my $status=shift(@_);
-	my @coderefs = @_;
-
-	until( __gnaw__at_end_of_string() ) {
-
-		__gnaw__initialize_call_tree($status);
 
 		my $position;
-		__gnaw__get_current_text_marker($position);
 
-		my $sub = sub{ 
-			GNAWMONITOR('matchseries');
-			__gnaw__series(@coderefs) 
-		};
+		# start at beginning of string and try to match
+		# if match fails, keep moving forward until we're
+		# at the end of the string.
+		until( __gnaw__at_end_of_string() ) {
 
-		if(__gnaw__try_to_parse($sub)) {
-			# DONE!
-			__gnaw__commit();
-			return 1;
-		} else {
-			__gnaw__restore_old_text_marker($position);
-			__gnaw__move_pointer_forward();
+			__gnaw__initialize_call_tree();
+			__gnaw__handle_call_tree($ptrtocoderef, $status);
+
+			__gnaw__get_current_text_marker($position);
+
+			if(__gnaw__try_to_parse(series(@coderefs))) {
+				# DONE!
+				__gnaw__commit();
+				return 1;
+			} else {
+				__gnaw__restore_old_text_marker($position);
+				__gnaw__move_pointer_forward();
+			}
 		}
-	}
 
-	return 0;
-
+		return 0;
+	};
+	return $coderef;
 }
+
 
 =head2 series
 
@@ -1075,8 +1267,23 @@ sub series {
 
 sub __gnaw__series {
 	GNAWMONITOR;
-	foreach my $coderef (@_) {
-		$coderef->();
+	my $series_location = $__gnaw__current_calltree_location;
+	local($__gnaw__current_quantifier_owner) = $series_location;
+
+	my @elements = @_;
+
+	my $sub = sub{ 
+		GNAWMONITOR('__gnaw__series closure');
+		foreach my $coderef (@elements) {
+			$coderef->();
+		}
+	};
+	# __gnaw__try_to_parse will handle any quantifier reruns.
+	# check return value for pass or fail of this whole series.
+	if(__gnaw__try_to_parse($sub)) {
+		return;
+	} else {
+		__gnaw__parse_failed();
 	}
 }
 
@@ -1440,6 +1647,290 @@ sub __gnaw__alternation {
 }
 
 
+#####################################################################
+#####################################################################
+#####################################################################
+# defining some "callbacks" for quantifier functionality.
+# we will define thrifty and greedy processes, 
+# and then put them into global hash.
+# user can then easily create their own behaviour for new quantifier types
+# or modify the existing behaviour.
+#####################################################################
+#####################################################################
+#####################################################################
+
+
+sub __gnaw__thrifty_preprocess {
+	GNAWMONITOR;
+
+	my $href = shift(@_);
+	__gnaw__quantifier_min_max_default_handler($href , @_);
+
+	my $min=$href->{min};
+	my $max=$href->{max};
+
+	my $descriptor = "quantifier (thrifty, $min,";
+	if(defined($href->{max})) {
+		$descriptor .= $href->{max};
+	}
+	$descriptor .= ')';
+	$href->{descriptor}=$descriptor;
+
+	# parser will ask to calculate number of times to try a command
+	$href->{try}=$min;
+
+	# parser will ask if calculation appears to have caused a rollover
+	$href->{rollover}=0;
+
+	# after trying command N times, parser will tell callback how many times it succeeded
+	$href->{success}=undef;
+}
+
+sub __gnaw__greedy_preprocess {
+	GNAWMONITOR;
+	my $href = shift(@_);
+	__gnaw__quantifier_min_max_default_handler($href , @_);
+
+	my $min=$href->{min};
+	my $max=$href->{max};
+
+	my $descriptor = "quantifier (greedy, $min,";
+	if(defined($href->{max})) {
+		$descriptor .= $href->{max};
+	}
+	$descriptor .= ')';
+	$href->{descriptor}=$descriptor;
+
+
+	# parser will ask to calculate number of times to try a command
+	$href->{try}=$max;
+
+	# parser will ask if calculation appears to have caused a rollover
+	$href->{rollover}=0;
+
+	# after trying command N times, parser will tell callback how many times it succeeded
+	$href->{successes}=undef;
+}
+
+	
+
+sub __gnaw__thrifty_calculate_next_try_value { 
+	GNAWMONITOR;
+	my ($href)=@_;
+
+	my $min = $href->{min};
+	my $max = $href->{max};
+	my $try = $href->{try};
+	my $successes = $href->{successes};
+	my $nexttry;
+	my $rollover=0;
+
+	GNAWMONITOR("NEXTTRYVALUE: min=$min");
+	GNAWMONITOR("NEXTTRYVALUE: max=".(defined($max)?$max:'undef') );
+	GNAWMONITOR("NEXTTRYVALUE: try=".(defined($try)?$try:'undef') );
+	GNAWMONITOR("NEXTTRYVALUE: successes=".(defined($successes)?$successes:'undef') );
+
+
+	if(defined($try) and defined($successes)) {
+		if(0) {
+		# start small and work our way up.
+		# if we tried 8 and got 8,
+		# then we should try 9 this time.
+		} elsif($try == $successes) {
+			GNAWMONITOR("NEXTTRYVALUE: try==successes");
+			$nexttry = $try+1;
+
+			# if at defined max, then make sure we dont' exceed it.
+			if(defined($max)) {
+				if($nexttry>$max) {
+					$nexttry=$min;
+					$rollover=1;
+				}
+			}
+
+		# if we tried 8 and got 5,
+		# then we should rollover and try the min value again
+		} elsif ($try > $successes) {
+			GNAWMONITOR("NEXTTRYVALUE: try>successes");
+			$nexttry = $min;
+			$rollover=1;
+
+		# else we tried 5 and got 8.
+		# something went wrong. die.
+		} else {
+			__gnaw__die("__gnaw__thrifty_calculate_next_try_value, try less than success. no idea what to do ($try < $successes)");
+		}
+	
+	# else haven't tried anything yet, go with min
+	} else {
+		$nexttry = $href->{min};
+		$rollover=0; # starting out, so no rollover
+	}
+
+	#set the values into hash
+	$href->{try}=$nexttry;
+	$href->{rollover}=$rollover;
+
+	GNAWMONITOR("NEXTTRYVALUE: rollover=$rollover");
+
+
+	return $rollover; 
+}
+
+
+
+sub __gnaw__greedy_calculate_next_try_value { 
+	GNAWMONITOR;
+	my ($href)=@_;
+
+	my $min = $href->{min};
+	my $max = $href->{max};
+	my $try = $href->{try};
+	my $successes = $href->{successes};
+	my $nexttry;
+	my $rollover=0;
+
+	GNAWMONITOR("NEXTTRYVALUE: min=$min");
+	GNAWMONITOR("NEXTTRYVALUE: max=".(defined($max)?$max:'undef') );
+	GNAWMONITOR("NEXTTRYVALUE: try=".(defined($try)?$try:'undef') );
+	GNAWMONITOR("NEXTTRYVALUE: successes=".(defined($successes)?$successes:'undef') );
+
+	if(defined($try) and defined($successes)) {
+		if(0) {
+
+		} elsif($successes<$min) {
+			$nexttry = $min;
+			$rollover=1;
+
+		# start big and work our way down.
+		# if we tried 8 and got 8,
+		# then we should try 7 this time.
+		# if we tried 8 and got 5
+		# then we should try 4 next time
+		} elsif($try >= $successes) {
+			$nexttry = $successes-1;
+
+			# if below min, then try max and set rollover
+			if($nexttry<$min) {
+				$nexttry=$max;
+				$rollover=1;
+			}
+
+		# else we tried 5 and got 8.
+		# something went wrong. die.
+		} else {
+			__gnaw__die("__gnaw__greedy_calculate_next_try_value, try less than success. no idea what to do ($try < $successes)");
+		}
+
+	# else haven't tried anything yet, go with max
+	} else {
+		$nexttry = $href->{max}; #may be undefined, but deal with it as infinite
+		$rollover=0; # starting out, so no rollover
+	}
+
+	#set the values into hash
+	$href->{try}=$nexttry;
+	$href->{rollover}=$rollover;
+
+	return $rollover; 
+}
+
+
+sub __gnaw__thrifty_report_successes {
+	GNAWMONITOR;
+	my ($href, $successes)=@_;
+
+	$href->{successes} = $successes;
+	my $try = $href->{try};
+
+	unless(defined($try)) {
+		$try = $successes;
+		$href->{try} = $try;
+	}
+
+	# if we tried 5 and got 8.
+	# something went wrong. die.
+	if($try<$successes) {
+		__gnaw__die("__gnaw__thrifty_report_successes, try less than success. no idea what to do ($try < $successes)");
+	}
+	
+	return;
+}
+
+sub __gnaw__greedy_report_successes {
+	GNAWMONITOR;
+	my ($href, $successes)=@_;
+
+	$href->{successes} = $successes;
+	my $try = $href->{try};
+
+	unless(defined($try)) {
+		$try = $successes;
+		$href->{try} = $try;
+	}
+
+	# if we tried 5 and got 8.
+	# something went wrong. die.
+	if($try<$successes) {
+		__gnaw__die("__gnaw__greedy_report_successes, try less than success. no idea what to do ($try < $successes)");
+	}
+	
+	return;
+}
+
+
+sub __gnaw__thrifty_and_greedy_successes_in_range {
+	GNAWMONITOR;
+	my ($href)=@_;
+
+	# if successes_in_range, 
+	if( 
+		($href->{successes} < $href->{min})
+		or
+		(	defined($href->{max}) and 
+			($href->{successes} > $href->{max}) 
+		) 
+	) { 
+		return 0;
+	} else {
+		return 1;
+	}
+}
+
+
+#####################################################################
+#####################################################################
+#####################################################################
+# first parameter to "quantifier" function is the type of quantifier.
+# behaviour for different quantifiers are defined in this hash.
+# existing types can be changed by assigning new callbacks.
+# and new types can be added by adding a key that is the "type"
+# and a value that is a hash of code refs with the defined names.
+#####################################################################
+#####################################################################
+#####################################################################
+
+%__gnaw__quantifier_callbacks_by_type = (
+
+	t => {	# t for thrifty
+		preprocess => 		\&__gnaw__thrifty_preprocess,
+		calculate_try => 	\&__gnaw__thrifty_calculate_next_try_value,
+		report_successes => 	\&__gnaw__thrifty_report_successes,
+		successes_in_range =>	\&__gnaw__thrifty_and_greedy_successes_in_range,
+	},
+
+	g => {	# g for greedy
+		preprocess => 		\&__gnaw__greedy_preprocess,
+		calculate_try => 	\&__gnaw__greedy_calculate_next_try_value,
+		report_successes =>	\&__gnaw__greedy_report_successes,
+		successes_in_range =>	\&__gnaw__thrifty_and_greedy_successes_in_range,
+	},
+);
+#####################################################################
+#####################################################################
+#####################################################################
+
+
 sub __gnaw__numeric_check {
 	GNAWMONITOR;
 	my ($ptrtonumtocheck)=@_;
@@ -1468,6 +1959,50 @@ sub __gnaw__numeric_check {
 }
 
 
+
+# pass in an href and the min/max values (including (min,) and '+' and 's' and '*') and 
+# this subroutine will initialize the hash
+sub __gnaw__quantifier_min_max_default_handler {
+	my $hashref = shift(@_);
+
+	# always specify some kind of min value or a '+' or '*' or something
+	my $min = shift(@_);
+	my $max;
+
+	unless(defined($min)){
+		__gnaw__die("Quantifier min-value must be defined");
+	}
+
+	if(($min eq 's')or($min eq '+')) {
+		$min = 1;
+		$max = undef;
+		if( scalar(@_) and (not(defined($_[0]))) ) {
+			shift(@_);
+		}
+
+	} elsif ($min eq '*') {
+		$min = 0;
+		$max = undef;
+		if( scalar(@_) and (not(defined($_[0]))) ) {
+			shift(@_);
+		}
+	} else {
+		__gnaw__numeric_check(\$min);
+
+		$max = shift(@_);
+
+		if(defined($max)) {
+			__gnaw__numeric_check(\$max);
+		}
+	}
+
+	$hashref->{min} = $min;
+	$hashref->{max} = $max;
+
+	if(scalar(@_)) {
+		__gnaw__die("quantifier called with unknown parameters (".$_[0].")");
+	}
+}
 
 =head2 quantifier
 
@@ -1518,13 +2053,14 @@ The "quantifier" function returns a coderef that is used in part of a larger gra
 sub quantifier{
 	GNAWMONITOR;
 
-	# my($thrifty_greedy, $operation, $min, $max)=@_;
+	# my($quantifier_type, $operation, $min, $max)=@_;
 	#
-	# thrifty_greedy is a 't' or a 'g' and is optional. 
-	# if no thrifty_greedy, then default to greedy
+	# quantifier_type currently supports a 't' or a 'g' for thrifty or greedy type quantifiers.
+	# the type is optional and defaults to "g" for greedy.
 	#
 	# operation is a code ref
 	#
+	# The existing quantifier types support 2 additional parameters to define min and max.
 	# min/max could be two integers 3,7 (at least 3, up to 7)
 	# it could also be a single integer 3 (at least 3, but up to infinity)
 	# it could also be a nonnumeric symbol such as '+' (1 or more)
@@ -1532,14 +2068,14 @@ sub quantifier{
 	# print Dumper \@_;
 
 
-	my $thrifty_greedy = 'g';
+	my $quantifier_type = 'g';
 
 	unless(ref($_[0]) eq 'CODE') {
-		$thrifty_greedy = shift(@_);
+		$quantifier_type = shift(@_);
 	}
 
-	unless( ($thrifty_greedy eq 't') or ($thrifty_greedy eq 'g') ) {
-		__gnaw__die("quantifier called with unknown thrifty/greedy marker '$thrifty_greedy'");
+	unless(exists( $__gnaw__quantifier_callbacks_by_type{$quantifier_type} )) {
+		__gnaw__die("quantifier called with unknown quantifier_type marker '$quantifier_type'");
 	}
 
 	my $operation = shift(@_);
@@ -1547,48 +2083,18 @@ sub quantifier{
 		__gnaw__die("Expecting a code reference to be passed to quantifier, received '$operation'");
 	}	
 
-	my $min = shift(@_);
-	my $max;
+	# call the handler that takes the rest of parameters and initializes hash
+	my $quantifier_callbacks = $__gnaw__quantifier_callbacks_by_type{$quantifier_type};
 
-	unless(defined($min)){
-		__gnaw__die("Quantifier min-value must be defined");
-	}
+	my $preprocess_callback = $quantifier_callbacks->{preprocess};
 
-	if(($min eq 's')or($min eq '+')) {
-		$min = 1;
-		$max = undef;
-		if( scalar(@_) and (not(defined($_[0]))) ) {
-			shift(@_);
-		}
+	my $preprocess_hash = {
+		quantifier_type => $quantifier_type
+	};
 
-	} elsif ($min eq '*') {
-		$min = 0;
-		$max = undef;
-		if( scalar(@_) and (not(defined($_[0]))) ) {
-			shift(@_);
-		}
-	} else {
-		__gnaw__numeric_check(\$min);
-
-		$max = shift(@_);
-
-		if(defined($max)) {
-			__gnaw__numeric_check(\$max);
-		}
-	}
-
-	if(scalar(@_)) {
-		__gnaw__die("quantifier called with unknown parameters (".$_[0].")");
-	}
-
+	$preprocess_callback->($preprocess_hash, @_);
+	
 	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
-	my $descriptor = "quantifier ($thrifty_greedy, $min,";
-
-	if(defined($max)) {
-		$descriptor .= $max;
-	}
-
-	$descriptor .= ')';
 
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
@@ -1604,25 +2110,9 @@ sub quantifier{
 		};
 
 		$status->{location} = $location;
-		$status->{descriptor} = $descriptor;
 
-		# note that we're going to attach some quantifier data to this hash 
-		# this will allow quantifer to figure out how many times to try a command.
-		# if we fail, but come back to this place in teh call tree, we can try
-		# a different value.
-		# this means that when we do a "commit", we might have to figure out a 
-		# way to keep certain quantifiers around in the call tree.
-		
-		$status->{min} = $min;
-		$status->{max} = $max;
-
-		if($thrifty_greedy eq 't') {
-			$status->{incrementor} = (+1);
-			$status->{try} = $min;
-
-		} else {
-			$status->{incrementor} = (-1);
-			$status->{try} = $max;
+		while(my($key,$data)=each(%$preprocess_hash)) {
+			$status->{$key}=$data;
 		}
 
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
@@ -1632,6 +2122,8 @@ sub quantifier{
 
 	return $coderef;
 }
+
+
 
 =head2 thrifty
 
@@ -1655,27 +2147,27 @@ sub greedy{
 	return quantifier('g', $operation, $min, $max);
 }
 
+
+#		t => {	# t for thrifty
+#		preprocess => 		\&__gnaw__thrifty_preprocess,
+#		calculate_try => 	\&__gnaw__thrifty_calculate_next_try_value,
+#		report_successes => 	\&__gnaw__thrifty_report_successes,
+#	},
+
+
 sub __gnaw__quantifier {
 	GNAWMONITOR;
 	my($operation)=@_;
 
 	my $quantifier_hash = $__gnaw__current_calltree_location;
 
+	my $quantifier_type = $quantifier_hash->{quantifier_type};
+
+	my $quantifier_callbacks = $__gnaw__quantifier_callbacks_by_type{$quantifier_type};
+
 	my $try = $quantifier_hash->{try};
 
 	my $openended = defined($try) ? 0 : 1;
-
-	# if we enter the quantifier and the number of times to try
-	# already exceeds the min/max range, then this quantifier failed.
-	unless($openended) {
-		if($try < $quantifier_hash->{min}) {
-			__gnaw__parse_failed(); # throws an exception
-		}
-
-		if( (defined($quantifier_hash->{max})) and ($try > $quantifier_hash->{max}) ) {
-			__gnaw__parse_failed(); # throws an exception
-		}
-	}
 
 	# get markers for start of entire quantifier command
 	my $text_marker_at_start_of_quantifier_command;
@@ -1683,103 +2175,51 @@ sub __gnaw__quantifier {
 	__gnaw__get_current_text_marker($text_marker_at_start_of_quantifier_command);
 	__gnaw__get_current_calltree_marker($call_marker_at_start_of_quantifier_command);
 
-
-	# get markers for start of this iteration
-	my $text_marker_at_last_passing_iteration;
-	my $call_marker_at_last_passing_iteration;
-	__gnaw__get_current_text_marker($text_marker_at_last_passing_iteration);
-	__gnaw__get_current_calltree_marker($call_marker_at_last_passing_iteration);
-
 	my $cnt;
-	my $successes;
+	my $number_of_successes=0;
+	my $successful_so_far=1;
 
 	# try the sub as many times as hashinfo says to try.
 	# if we try it 7 times and it works, then it fails on the 8th try,
 	# then set the marker to the end of the 7th try and set the 
 	# hashinfo to 8 so we know how many times to try next time.
 	# (use short circuit OR to prevent evaluation of an undefined 'try' value)
-	for($cnt=1; ($openended or ($cnt<=$try)); $cnt++) {
-
-		# try the subroutine
-		# if this iteration failed
-		if(__gnaw__try_to_parse($operation) == 0) {
-
-			# cnt variable is always one ahead
-			$successes = $cnt-1;
-
-			# in case something fails after this,
-			# record how many times to try next time we come here
-			$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
-
-			# if we're below the minimum
-			# or if there is a defined maximum (not a "1 or greater" quantifier)
-			#    and we're above the maximum, 
-			# then parse fail
-			if( 
-				($successes < $quantifier_hash->{min})
-				or
-				(	defined($quantifier_hash->{max}) and 
-					($successes > $quantifier_hash->{max}) 
-				) 
-			) { 
-				# we're either too many or not enough. This "try" failed.
-
-				# remove the iteration links, we won't need them
-				__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
-				__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
-
-				# quantifier failed, go back to very beginning
-				__gnaw__restore_old_text_marker( $text_marker_at_start_of_quantifier_command );
-				__gnaw__restore_old_calltree_marker( $call_marker_at_start_of_quantifier_command );
-
-				__gnaw__parse_failed(); # throws an exception
-			} else {
-
-				# the number of successes are within acceptable min/max range.
-				# ignore this last failure and set marker back to last successful location
-				__gnaw__restore_old_text_marker( $text_marker_at_last_passing_iteration );
-				__gnaw__restore_old_calltree_marker( $call_marker_at_last_passing_iteration );
-
-				# we don't need the beginning markers either, unlink them too.
-				__gnaw__unlink_old_text_marker($text_marker_at_start_of_quantifier_command);
-				__gnaw__unlink_old_calltree_marker($call_marker_at_start_of_quantifier_command);
-
-				# eject from the loop, return immediately, and allow the next command to take place.
-				return;
-			}
+	for($cnt=1; ( ($openended or ($cnt<=$try)) and $successful_so_far ); $cnt++) {
+		# if we try this iteration, keep going.
+		GNAWMONITOR("__gnaw__quantifier in loop to try command (cnt=$cnt)");
+		if(__gnaw__try_to_parse($operation)) {
+			GNAWMONITOR("__gnaw__quantifier tried command and worked");
+			$number_of_successes++;
 		} else {
-
-			# else tried and succeeded.
-			# need to garbage collect the markers
-			__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
-			__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
-
-			# since this iteration passed, update the markers to point to here
-			__gnaw__get_current_text_marker($text_marker_at_last_passing_iteration);
-			__gnaw__get_current_calltree_marker($call_marker_at_last_passing_iteration);
-
+			GNAWMONITOR("__gnaw__quantifier tried command and failed");
+			$successful_so_far=0;
 		}
+	}
 
+	GNAWMONITOR("__gnaw__quantifier number_of_successes=$number_of_successes");
 
-	} 
+	# report how many successes we actually had
+	$quantifier_callbacks->{report_successes}->($quantifier_hash, $number_of_successes);
 
-	# successfully tried the number of calls to operation.
-	# in case something fails after this,
-	# record how many times to try next time we come here
-	# note that "$try" might be undefined, but "$cnt" should always be defined.
+	# if successes_in_range, 
+	if( $quantifier_callbacks->{successes_in_range}->($quantifier_hash) ) { 
 
-	# cnt variable is always one ahead
-	$successes = $cnt-1;
-	$quantifier_hash->{try} = $successes + $quantifier_hash->{incrementor};
+		GNAWMONITOR("__gnaw__quantifier successes_in_range=TRUE");
 
-	# now delete the original markers since we shouldn't need them anymore.
-	__gnaw__unlink_old_text_marker($text_marker_at_start_of_quantifier_command);
-	__gnaw__unlink_old_calltree_marker($call_marker_at_start_of_quantifier_command);
+		# this quantifier passed, get rid of the start markers
+		__gnaw__unlink_old_text_marker($text_marker_at_start_of_quantifier_command);
+		__gnaw__unlink_old_calltree_marker($call_marker_at_start_of_quantifier_command);
 
-	# delete these too
-	__gnaw__unlink_old_text_marker($text_marker_at_last_passing_iteration);
-	__gnaw__unlink_old_calltree_marker($call_marker_at_last_passing_iteration);
+	} else {
+		# we're either too many or not enough.
+		# quantifier failed, go back to very beginning
+		GNAWMONITOR("__gnaw__quantifier successes_in_range=FALSE");
 
+		__gnaw__restore_old_text_marker( $text_marker_at_start_of_quantifier_command );
+		__gnaw__restore_old_calltree_marker( $call_marker_at_start_of_quantifier_command );
+
+		__gnaw__parse_failed(); # throws an exception
+	}
 }
 
 
@@ -2025,7 +2465,7 @@ sub __gnaw__commit {
 	GNAWMONITOR;
 	#__gnaw__dump_current_call_tree();
 	__gnaw__execute_callbacks_in_call_tree();
-	__gnaw__initialize_call_tree( {location=>'commit', descriptor=>'commit'} );
+	__gnaw__initialize_call_tree( );
 	__gnaw__delete_linked_list_from_start_to_current_pointer();
 }
 

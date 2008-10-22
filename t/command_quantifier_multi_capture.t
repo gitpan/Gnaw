@@ -1,6 +1,6 @@
 
 
-use Test::More tests=>15;
+use Test::More tests=>3;
 
 use Gnaw;
 
