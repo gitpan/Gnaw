@@ -103,4 +103,17 @@ Added shortcuts for "something" and "anything".
 These map to '.+' and '.*'
 
 
+0.10	23 October 2008
+
+Added consumable function and got first draft of it to work with 
+grammars not involving quantifiers. Grammars with quantifiers
+and consumables end up crashing.
+
+consumable will call any callbacks, delete the appropriate 
+section of the call tree, and delete the consumable text.
+
+Added a subroutine that dumps what's left of the string.
+
+
+
 =====================================================================

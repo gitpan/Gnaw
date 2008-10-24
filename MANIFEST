@@ -8,6 +8,7 @@ t/boilerplate.t
 t/command_alternation.t
 t/command_callback.t
 t/command_capture.t
+t/command_consumable.t
 t/command_match_lit.t
 t/command_quantifier_capture.t
 t/command_quantifier_multi_capture.t

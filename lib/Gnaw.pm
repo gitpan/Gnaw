@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.09
+Version 0.10
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -348,6 +348,41 @@ sub __gnaw__insert_element_in_linked_list_at_end {
 }
 
 
+sub __gnaw__delete_this_element_in_text_linked_list {
+	GNAWMONITOR;
+
+	my ($element)=@_;
+
+	return if($element eq $__gnaw__head_element);
+	return if($element eq $__gnaw__tail_element);
+
+	my $prev = $element->[__GNAW__PREV];
+	my $next = $element->[__GNAW__NEXT];
+
+	# first get all the markers and move them one letter forward
+	my $hashofmarkers = $element->[__GNAW__LOCATION_MARKERS];
+
+	my @hkeys = keys(%$hashofmarkers);
+
+	my $nexthashofmrkrs = $next->[__GNAW__LOCATION_MARKERS];
+
+	foreach my $hkey (@hkeys) {
+		next if($hkey eq 'debug');
+
+		my $marker = $hashofmarkers->{$hkey};
+		$nexthashofmrkrs->{$hkey} = $marker;
+		$marker->{pointer_to_text}=$next;
+		
+	}
+
+	%{$element->[__GNAW__LOCATION_MARKERS]} = ();
+
+	@$element = ();
+
+	$prev->[__GNAW__NEXT] = $next;
+	$next->[__GNAW__PREV] = $prev;
+}
+
 # text markers, an explanation.
 #
 # the text is stored in a linked list.
@@ -460,6 +495,11 @@ sub __gnaw__restore_old_text_marker {
 sub __gnaw__unlink_old_text_marker {
 	my($markerref) = @_;
 	GNAWMONITOR($markerref);
+
+	# if it was already deleted, just return.
+	if(exists($markerref->{MARKER_DELETED})) {
+		return;
+	}
 
 	# the element in the linked list contains a hash of location markers.
 	# we want to go into that hash and delete this marker.
@@ -620,6 +660,28 @@ sub __gnaw__get_string_between_two_pointers {
 
 	return $string;
 }
+
+sub __gnaw__get_entire_string {
+	return __gnaw__get_string_between_two_pointers ( $__gnaw__head_element, $__gnaw__tail_element );
+}
+
+sub __gnaw__delete_string_between_two_pointers {
+	GNAWMONITOR;
+	my ($start,$stop) = @_;
+
+	my $this = $start;
+
+	if($this eq $__gnaw__head_element) {
+		$this=$this->[__GNAW__NEXT];
+	}
+
+	while( ($this ne $stop) and  ($this ne $__gnaw__tail_element) ){
+		my $next = $this->[__GNAW__NEXT];
+		__gnaw__delete_this_element_in_text_linked_list($this);
+		$this = $next;
+	}
+}
+
 
 sub __gnaw__string_showing_user_current_location_in_text {
 	GNAWMONITOR;
@@ -830,14 +892,12 @@ sub __gnaw__restore_old_calltree_marker {
 }
 
 sub __gnaw__unlink_old_calltree_marker {
-	GNAWMONITOR;
 	my($markerref) = @_;
+	GNAWMONITOR("unlink_old_calltree_marker $markerref");
 
 	# if already deleted, something really bad happened.
 	if(exists($markerref->{MARKER_DELETED})) {
-		__gnaw__die("tried to __gnaw__unlink_old_calltree_marker with a marker " .
-				"that had already been deleted. Need to " . 
-				"__gnaw__get_current_calltree_marker after every restore.");
+		return;
 	}
 
 	# the marker points to one hash in the call tree.
@@ -2453,51 +2513,65 @@ sub __gnaw__capture {
 	__gnaw__get_current_text_marker($start_capture_point);
 	$capture_hash->{start} = $start_capture_point;
 
-	$gnaw_coderef->();
+	eval {
+		$gnaw_coderef->();
+	};
+
+	if($@) {
+		__gnaw__unlink_old_text_marker($start_capture_point);
+		die $@;
+	}
 
 	my $stop_capture_point;
 	__gnaw__get_current_text_marker($stop_capture_point);
 	$capture_hash->{stop} = $stop_capture_point;
-
 }
 
 
 # don't call this unless you've either (1) successfully parsed the whole input text or
 # (2) the parser did a "commit" and the call tree must be correct
-sub __gnaw__execute_callbacks_in_call_tree {
+sub __gnaw__execute_any_callbacks_at_this_call {
 	GNAWMONITOR;
 	#__gnaw__dump_current_call_tree();
 
-	my $command = $__gnaw__current_calltree_location;
+	my ($command) = @_;
+	return unless(defined($command));
 
 	my $callback;
+
+	if(exists($command->{capture})) {
+		print "found capture on call tree\n";
+		my $start_marker = $command->{start};
+		my $start_pointer = $start_marker->{pointer_to_text};
+
+		my $stop_marker  = $command->{stop};
+		my $stop_pointer = $stop_marker->{pointer_to_text};
+
+		my $string = __gnaw__get_string_between_two_pointers
+				($start_pointer, $stop_pointer);
+		$callback = $command->{callback};
+		$callback->($string, $start_pointer, $stop_pointer);
+
+		# unlink the markers so they can be garbage collected.
+		__gnaw__unlink_old_text_marker($start_marker);
+		__gnaw__unlink_old_text_marker($stop_marker);
+
+	} elsif (exists($command->{callback})) {
+		print "found user callback on call tree\n";
+		$callback = $command->{callback};
+		$callback->();
+	}
+
+}
+
+sub __gnaw__execute_callbacks_in_call_tree {
+	GNAWMONITOR;
+	my $command = $__gnaw__current_calltree_location;
 	my $counter = 0;
 
 	while(defined($command)) {
 		$counter++;
-		if(exists($command->{capture})) {
-			print "found capture on call tree at counter '$counter'\n";
-			my $start_marker = $command->{start};
-			my $start_pointer = $start_marker->{pointer_to_text};
-
-			my $stop_marker  = $command->{stop};
-			my $stop_pointer = $stop_marker->{pointer_to_text};
-
-			my $string = __gnaw__get_string_between_two_pointers
-					($start_pointer, $stop_pointer);
-			$callback = $command->{callback};
-			$callback->($string, $start_pointer, $stop_pointer);
-
-			# unlink the markers so they can be garbage collected.
-			__gnaw__unlink_old_text_marker($start_marker);
-			__gnaw__unlink_old_text_marker($stop_marker);
-
-		} elsif (exists($command->{callback})) {
-			print "found user callback on call tree at counter '$counter'\n";
-			$callback = $command->{callback};
-			$callback->();
-		}
-
+		__gnaw__execute_any_callbacks_at_this_call($command);
 		$command = $command->{previous};
 	}
 }
@@ -2536,6 +2610,7 @@ sub consumable {
 	GNAWMONITOR;
 
 	my($operation)=@_;
+
 	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
 
 	my $coderef;
@@ -2562,18 +2637,96 @@ sub __gnaw__consumable {
 
 	my($operation)=@_;
 
-	# get marker for current position. should be a "consumable" command.
-	my $location_of_starting_consummable_command = $__gnaw__current_calltree_location;
+	my $startcall = __gnaw__get_current_calltree_marker();
+	my $starttext = __gnaw__get_current_text_marker();
 
-	# try the operation. if it fails, let exception throw through
-	$operation->();
+	$startcall->{consumable}=1;
+	$starttext->{consumable}=1;
+
+	GNAWMONITOR("startcall is ".$startcall);
+	GNAWMONITOR("starttext is ".$starttext);
+
+	
+	GNAWMONITOR("__gnaw__consumable about to eval");
+
+	GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
+
+	eval {
+		# try the operation.
+		$operation->();
+	};
+
+	GNAWMONITOR("__gnaw__consumable finished eval");
+	GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
+
+	if($@) {
+		GNAWMONITOR( "_gnaw__consumable failed eval" );
+		__gnaw__unlink_old_calltree_marker($startcall);
+		__gnaw__unlink_old_text_marker($starttext);
+
+		die $@;
+	}
+
+	GNAWMONITOR("__gnaw__consumable passed eval.");
+	GNAWMONITOR("__gnaw__consumable call tree looks like this:");
+	GNAWMONITOR(__gnaw__dump_current_call_tree() );
+	GNAWMONITOR("__gnaw__consumable about to delete consumable portion from calltree. ");
 
 	# if it passes, 
 	# call any callbacks between the current location and the start location
-	# delete commands in call tree from current to start
-	# delete text in linked list from current to start.
+	# delete each call as we go along
+	my $command = $__gnaw__current_calltree_location;
+
+	while(defined($command) and ($command ne $startcall) and ($command ne $__gnaw__call_tree) ) {
+		GNAWMONITOR("__gnaw__consumable doing callbacks for and then deleting this element");
+		GNAWMONITOR("__gnaw__consumable descriptor: ".$command->{descriptor});
+		GNAWMONITOR("__gnaw__consumable location: ".$command->{location});
+
+		__gnaw__execute_any_callbacks_at_this_call($command);
+		my $previous = $command->{previous};
+
+		# get all the markers pointing here and deal with them.
+		my $markerhref = $command->{LOCATION_MARKERS};
+
+		my @markerkeys = keys(%$markerhref);
+
+		foreach my $markerkey (@markerkeys) {
+			my $marker = $markerhref->{$markerkey};
+			__gnaw__unlink_old_calltree_marker($marker);
+
+			# if it's a marker for the "consumable" command
+			# then delete it completely.
+			if(exists($marker->{consumable})) {
+				%$marker=();
+			} 
+		}
+
+		%$command = ();
+		$command = $previous;
+	}
+
+	GNAWMONITOR("__gnaw__consumable new call tree looks like this:");
+	GNAWMONITOR(__gnaw__dump_current_call_tree());
 
 
+	# delete text in linked list that occurred during this command
+	my $starttextptr = $starttext->{pointer_to_text};
+	my $stoptextptr  = $__gnaw__current_linkedtext_element;
+
+	__gnaw__delete_string_between_two_pointers(
+		$starttextptr, $stoptextptr 
+	);
+
+	GNAWMONITOR("__gnaw__consumable just deleted consumable text. Text now looks like this");
+	GNAWMONITOR(__gnaw__string_showing_user_current_location_in_text());
+
+	# we don't need to unlink the calltree marker because it
+	# got deleted when we did the callbacks and deleted each
+	# associated call.
+	# __gnaw__unlink_old_calltree_marker($startcall);
+
+	# delete the text now that all the callbacks are done.
+	#__gnaw__unlink_old_text_marker($starttext);
 
 }
 
