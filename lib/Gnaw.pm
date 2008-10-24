@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.07
+Version 0.09
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.07';
+our $VERSION = '0.09';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -1212,7 +1212,7 @@ sub match {
 
 			if(__gnaw__try_to_parse(series(@coderefs))) {
 				# DONE!
-				__gnaw__commit();
+				__gnaw__done();
 				return 1;
 			} else {
 				__gnaw__restore_old_text_marker($position);
@@ -1437,14 +1437,14 @@ sub __gnaw__set {
 
 # character classes NOT: anything BUT what's in the specified class of characters.
 
-=head2 set_n
+=head2 SET
 
-The "set_n" function is a gnaw grammar component which applies a NEGATIVE character class or NEGATIVE character set to the string being parsed. The "set_n" function takes a string which describes the character class. The "set_n" function parses one metacharacter within the string and that is a '-' character. This is used to define a range of charcters. All digits can be described as "0-9". All letters can be described as "a-zA-Z". If you want the "-" character to be part of the set itself, make it the first character in the string you pass into set.
+The "SET" function is a gnaw grammar component which applies a NEGATIVE character class or NEGATIVE character set to the string being parsed. The "SET" function takes a string which describes the character class. The "SET" function parses one metacharacter within the string and that is a '-' character. This is used to define a range of charcters. All digits can be described as "0-9". All letters can be described as "a-zA-Z". If you want the "-" character to be part of the set itself, make it the first character in the string you pass into set.
 
-The "set_n" function returns a coderef that is used in part of a larger grammar.
+The "SET" function returns a coderef that is used in part of a larger grammar.
 
 	# look for anything other than an x, y, or z in the string being parsed.
-	my $grammar = match(set_n("xyz"));
+	my $grammar = match(SET("xyz"));
 	
 	# apply the grammar to a string
 	if($grammar->('hello world')) {
@@ -1455,7 +1455,7 @@ The "set_n" function returns a coderef that is used in part of a larger grammar.
 
 =cut
 
-sub set_n {
+sub SET {
 	GNAWMONITOR;
 	my ($characterset)=@_;
 
@@ -1469,21 +1469,21 @@ sub set_n {
 	my $status = {};
 	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
 	$status->{location} = $location;
-	$status->{descriptor} = "character set_n '$characterset'";
+	$status->{descriptor} = "character SET '$characterset'";
 
 	my $coderef;
 	my $ptrtocoderef=\$coderef;
 	$coderef = sub{
-		GNAWMONITOR('set_noperation');
+		GNAWMONITOR('SEToperation');
 		__gnaw__handle_call_tree($ptrtocoderef, $status);
-		__gnaw__set_n($char_set_hash_ref);
+		__gnaw__SET($char_set_hash_ref);
 	};
 	return $coderef;
 
 }
 
 
-sub __gnaw__set_n {
+sub __gnaw__SET {
 	GNAWMONITOR;
 	my ($char_set_hash_ref)=@_;
 
@@ -1505,14 +1505,14 @@ sub set_digit {
 }
 
 
-=head2 set_DIGIT
+=head2 SET_DIGIT
 
-The "set_digit" is a shortcut equivalent to set_n('0-9'). 
+The "SET_DIGIT" is a shortcut equivalent to SET('0-9').  i.e. [^0-9]
 
 =cut
 
-sub set_DIGIT {
-	return set_n('0-9');
+sub SET_DIGIT {
+	return SET('0-9');
 }
 
 =head2 set_whitespace
@@ -1524,13 +1524,13 @@ sub set_whitespace {
 	return set("\t\n\r\f");
 }
 
-=head2 set_WHITESPACE
+=head2 SET_WHITESPACE
 
-The "set_WHITESPACE" is a shortcut equivalent to set_n("\t\n\r\f"). 
+The "SET_WHITESPACE" is a shortcut equivalent to SET("\t\n\r\f"). i.e. [^\t\n\r\f]
 
 =cut
-sub set_WHITESPACE {
-	return set_n("\t\n\r\f");
+sub SET_WHITESPACE {
+	return SET("\t\n\r\f");
 }
 
 =head2 set_identifier
@@ -1543,17 +1543,61 @@ sub set_identifier {
 	return set('a-zA-Z0-9_');
 }
 
-=head2 set_IDENTIFIER
+=head2 SET_IDENTIFIER
 
-The "set_IDENTIFIER" is a shortcut equivalent to set_n('a-zA-Z0-9_'). 
+The "SET_IDENTIFIER" is a shortcut equivalent to SET('a-zA-Z0-9_').  i.e. [^a-zA-Z0-9_]
 
 =cut
 
-sub set_IDENTIFIER {
-	return set_n('a-zA-Z0-9_');
+sub SET_IDENTIFIER {
+	return SET('a-zA-Z0-9_');
 }
 
 
+
+=head2 thing
+
+The "thing" function is a gnaw grammar component which matches any single character in the string being parsed. It is equivalent to the '.' operator in normal regular expression format. I would have called it "character" but that is a bit long and "char" is usually a reserved word. 
+
+	my $grammar = match(lit('b'), thing, lit('b'));
+
+	# these will all match.
+	$grammar->("bob");
+	$grammar->("bib");
+	$grammar->("bub");
+
+	# this will fail to match.
+	$grammar->("bb");
+
+The "thing" function returns a coderef that is used in part of a larger grammar.
+
+=cut
+
+
+sub thing { 
+	GNAWMONITOR;
+
+	my $status = {};
+	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
+	$status->{location} = $location;
+	$status->{descriptor} = "a single 'thing' operation";
+
+	my $coderef;
+	my $ptrtocoderef=\$coderef;
+	$coderef = sub{
+		GNAWMONITOR('thing operation');
+		__gnaw__handle_call_tree($ptrtocoderef, $status);
+
+		if(__gnaw__at_end_of_string()) {
+			__gnaw__parse_failed();
+		} else {
+			__gnaw__move_pointer_forward();
+		}
+
+	};
+	return $coderef;
+
+}
 
 =head2 alternation
 
@@ -2004,6 +2048,15 @@ sub __gnaw__quantifier_min_max_default_handler {
 	}
 }
 
+#####################################################################
+#####################################################################
+#####################################################################
+# quantifier
+#####################################################################
+#####################################################################
+#####################################################################
+
+
 =head2 quantifier
 
 The "quantifier" function is a gnaw grammar component which receives a single grammar component and attempts to apply that command repeatedly to the string being parsed. The parameters passed into the "quantifier" function are defined as follows:
@@ -2147,12 +2200,54 @@ sub greedy{
 	return quantifier('g', $operation, $min, $max);
 }
 
+=head2 some
 
-#		t => {	# t for thrifty
-#		preprocess => 		\&__gnaw__thrifty_preprocess,
-#		calculate_try => 	\&__gnaw__thrifty_calculate_next_try_value,
-#		report_successes => 	\&__gnaw__thrifty_report_successes,
-#	},
+The "some" function is a shortcut to a "quantifier" function set to greedy, and the quantity set to "1 or more".
+
+=cut 
+
+sub some {
+	my($operation)=@_;
+	return quantifier('g', $operation, 1);
+}
+
+=head2 any
+
+The "any" function is a shortcut to a "quantifier" function set to greedy, and the quantity set to "0 or more".
+
+=cut 
+
+sub any {
+	my($operation)=@_;
+	return quantifier('g', $operation, 0);
+}
+
+
+
+=head2 something
+
+The "something" function is a shortcut to a "quantifier" function set to greedy, the quantity set to "1 or more", and the command set to "thing". This is equivalent to the '.+' operator in the usual regular expression syntax.
+
+=cut 
+
+sub something {
+	my($operation)=@_;
+	return quantifier('g', thing(), 1);
+}
+
+
+=head2 anything
+
+The "anything" function is a shortcut to a "quantifier" function set to greedy, the quantity set to "0 or more", and the command set to "thing". This is equivalent to the '.+' operator in the usual regular expression syntax.
+
+=cut 
+
+sub anything {
+	my($operation)=@_;
+	return quantifier('g', thing(), 0);
+}
+
+
 
 
 sub __gnaw__quantifier {
@@ -2407,67 +2502,81 @@ sub __gnaw__execute_callbacks_in_call_tree {
 	}
 }
 
-# user can call this in grammar, or other functions can call this when
-# ready to commit to a particular parsing.
-# go through call tree and call any callbacks,
-# wipe out the call tree, 
-# and delete the text being parsed up to this point.
 
-=head2 commit
-
-NOTE: THE "commit" FUNCTION DOES NOT WORK RIGHT NOW.
-
-In fact, it makes the parser go all wonky. I believe to get "commit" to work I will have to rewrite a bunch of other bits in the parser. But, when "commit" does hopefully work, this is what it will do:
-
-xxxxxxxxxxxxxxxxxxxxxxxxx
-
-The "commit" function can be placed anywhere within a grammar where the user has decided that once the parser has reached this location, no other interpretation of the string is possible. The parser has found the correct parse of the string to this point.
-
-The "commit" function will cause any callbacks and any captures to execute upon reaching that point in the grammar.
-
-The "commit" function also causes a number of things to occur behind the scenes which mean that un-committing is not possible. Internal data structures which have accumulated during the parsing of the string will be deleted. If you have a "commit" function in your grammar, if your parser hits that point, you can not uncommit at a later time. 
-
-	# the callback will schedule the "x" to be printed on success,
-	# but the "commit" function immediately after will be treated as a success
-	# and cause the callback to be called.
-	my $grammar = match(greedy( series(lit('a'), callback(sub{print"X\n";}), commit) 7,9) );
-	
-	# this will fail to match but the callbacks will be called because "commit" forces them.
-	$grammar->('aaaaa');
-
-=cut
-
-sub commit {
-
-	GNAWMONITOR;
-	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
-
-	my $coderef;
-	my $ptrtocoderef=\$coderef;
-	$coderef = sub{
-		GNAWMONITOR('commitoperation');
-		my $status = {
-			commit => 1,
-		};
-
-		$status->{location} = $location;
-		$status->{descriptor} = "capture";
-
-		__gnaw__handle_call_tree($ptrtocoderef, $status);
-		__gnaw__commit();
-
-	};
-	return $coderef;
-}
-
-
-sub __gnaw__commit {
+sub __gnaw__done {
 	GNAWMONITOR;
 	#__gnaw__dump_current_call_tree();
 	__gnaw__execute_callbacks_in_call_tree();
 	__gnaw__initialize_call_tree( );
 	__gnaw__delete_linked_list_from_start_to_current_pointer();
 }
+
+
+
+
+=head2 consumable
+
+The "consumable" function is useful for parsing large portions of text. The "consumable" function receives a single grammar component and whenever that component successfully parses, even though the full grammar has not finished, then "consumable" will remove any internal data structures related to the command. If there are any callbacks scheduled inside of that command, they will be executed before being deleted. 
+
+If you are parsing or matching a small block of text, then "consumable" might not be useful for your application.
+
+If you have a hierarchical grammar and all the subrules from some level on down are wrapped as "consumable", then theoretically, that grammar could parse an infinite amount of text without running out of memory. As long as the consumable subrules match blocks of text that fit in memory, then the parser will operate on one consumable block, and then delete it from memory when that block matches.
+
+Note that "consumable" acts as an immediately executed code reference rather than a scheduled callback in the sense that it gets called as soon as the single grammar command it contains succeeds.
+
+If the grammar later fails and part of the reason was because that consumable portion did not actually match, then the parser will not be able to retry the grammar from prior to the consumable portion. That portion is gone.
+
+When the single grammar command succeeds, the "consumable" function deletes the text currently matching that single grammar command and it deletes the portion of the call tree that corresponds to everything executed as part of that single grammar component.
+
+The "consumable" function returns a coderef that is used in part of a larger grammar.
+
+=cut
+
+sub consumable {
+	GNAWMONITOR;
+
+	my($operation)=@_;
+	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
+
+	my $coderef;
+	my $ptrtocoderef=\$coderef;
+	$coderef = sub{
+		GNAWMONITOR('consumableoperation');
+		my $status = {
+			consumable => 1,
+		};
+
+		$status->{location} = $location;
+		$status->{descriptor} = "consumable";
+
+		__gnaw__handle_call_tree($ptrtocoderef, $status);
+		__gnaw__consumable($operation);
+
+	};
+	return $coderef;
+}
+
+
+sub __gnaw__consumable {
+	GNAWMONITOR;
+
+	my($operation)=@_;
+
+	# get marker for current position. should be a "consumable" command.
+	my $location_of_starting_consummable_command = $__gnaw__current_calltree_location;
+
+	# try the operation. if it fails, let exception throw through
+	$operation->();
+
+	# if it passes, 
+	# call any callbacks between the current location and the start location
+	# delete commands in call tree from current to start
+	# delete text in linked list from current to start.
+
+
+
+}
+
 
 
 

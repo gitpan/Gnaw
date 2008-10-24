@@ -24,6 +24,7 @@ code reference is your grammar.
 When you dereference that grammar, if it is a "match" grammar 
 (i.e. $string =~ m//) then you pass in the string you want to parse.
 
+
 	use Gnaw;
 
 	# create the grammar

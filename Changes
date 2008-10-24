@@ -63,32 +63,44 @@ oh, and put hardreturns into the readme.
 
 0.07	22 Oct 2008
 
-Oh my head. Massive rewrite. The calltree was conceptually totally wrong.
-Changed call tree from a tree to a stack. No longer keep different branches
-around. 
+Oh my head. Massive rewrite. The calltree was conceptually totally 
+wrong. Changed call tree from a tree to a stack. No longer keep 
+different branches around. 
 
 Multiple quantifiers now work together. The following grammar now works:
 
-$grammar = 
-	match(
-		series( 
-			capture(greedy(lit('x'),'s'),$first_callback), 
-			capture(greedy(lit('x'),'s'),$second_callback)
-		)
-	);
+	$grammar = 
+		match(
+			series( 
+				capture(greedy(lit('x'),'s'),$first_callback), 
+				capture(greedy(lit('x'),'s'),$second_callback)
+			)
+		);
 
-$grammar->('xxxxx')
+	$grammar->('xxxxx')
 
 
-The first greedy will swallow the entire string, then release one character.
-This will allow second greedy to match on the last x, and the entire
-grammar passes.
+The first greedy will swallow the entire string, then release one 
+character. This will allow second greedy to match on the last x, 
+and the entire grammar passes.
 
 first capture eq 'xxxx'.
 second capture eq 'x'
 
-The commit function doesn't work with quantifiers yet.
-Changed the commit test to use a long series of lits instead.
-all tests now pass. However, there are some known bugs that
-don't have tests for them.
+0.09	23 Oct 2008
 
+Got rid of the "commit" function. Replacing it with a function called 
+"consumable". The "consumable" function is still in progress. Added a 
+"thing" function which maps to a regular expression "dot" function, 
+as in 
+
+	/ blah . blah /
+
+Added some quantifier shortcuts for "some" and "any". 
+These map to '+' and '*'.
+
+Added shortcuts for "something" and "anything". 
+These map to '.+' and '.*'
+
+
+=====================================================================
