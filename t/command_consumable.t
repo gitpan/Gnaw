@@ -1,30 +1,29 @@
 
 
-use Test::More tests=>3;
+use Test::More tests=>6;
 
 use Gnaw;
 
-
-my $captured;
+my $captured=[];
 
 my $callback = sub {
-	$captured = shift(@_);
+	my $text = shift(@_);
+	push(@$captured, $text);
 };
 
 
 sub fruit {alternation(lit('apple'), lit('pear'), lit('peach'), lit('orange'))}
-
 sub eatfruit {  consumable(capture( fruit , $callback)) }
+$grammar = match( greedy(eatfruit, 's'));
 
-# this doesn't work yet. quantifiers and consumables clash.
-# $grammar = match( greedy(fruit, 's'));
+ok( 1==$grammar->('peach apple pear orange potato'), "1.1 confirm match");
 
+ok( ($captured->[0]) eq 'peach', "2.2, checking capture");
+ok( ($captured->[1]) eq 'apple', "2.3, checking capture");
+ok( ($captured->[2]) eq 'pear', "2.4, checking capture");
+ok( ($captured->[3]) eq 'orange', "2.5, checking capture");
 
-$grammar = match( eatfruit );
-
-ok( 1==$grammar->('peach apple pear orange'), "1.1");
-ok( $captured eq 'peach', "1.2, checking capture");
 my $final = __gnaw__get_entire_string();
 
-ok( $final eq ' apple pear orange', "1.3, checking what's left, confirming consumed");
+ok( $final eq ' potato', "3.3, checking what's left, confirming consumed");
 

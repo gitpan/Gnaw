@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.10
+Version 0.11
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -68,6 +68,18 @@ Again, everything may change tomorrow as I sort this out.
 
 =head1 FUNCTIONS
 
+Most functions in Gnaw can be categorized as "inner" or "outer" functions. 
+
+The "inner" functions are functions that are used inside a grammar to define that grammar. This would include basic functions like "lit" and "set" and more advanced functions like "altenation" and "quanifier". These inner functions may or may not take any parameters to them ("thing" for example takes no parameters. "quantifier" takes several and some are optional.) The inner functions return code refs which are then used as part of a larger grammar. An "inner" grammar function may be an input to another "inner" function. For example, the "quantifier" function must recieve an inner function to which it will apply the quantifier. The "quantifier" will then return a coderef which can be used as part of a larger grammar or may be passed to an outer function.
+
+The "outer" functions are functions that are the outer command of a grammar. They take one or more "inner" commands as input parameters, and they return a coderef which defines the whole grammar. This coderef can then be dereferenced to execute the grammar and apply it to a string. When the coderef from the outer function is dereferenced, it may take the string it is operating on as its input parameter. The "match" function is an example of this behaviour.
+
+=cut
+
+=head2 Inner Functions
+
+The "inner" functions are functions that are used inside a grammar. They may recieve other "inner" functions and their return value may be used by other "inner" functions or used by an "outer" function.
+
 =cut
 
 use warnings;
@@ -76,8 +88,6 @@ use Data::Dumper;
 
 # declare this now so we can use it in the "parse fail" sub
 our %__gnaw__quantifier_callbacks_by_type;
-
-our $GNAWDEBUG=0;
 
 sub GNAWMONITOR {}
 
@@ -583,8 +593,6 @@ our $__gnaw__skip_nothing = sub{};
 our $__gnaw__skip = $__gnaw__skip_whitespace;
 ####################################################################
 
-
-
 sub __gnaw__curr_character {
 	GNAWMONITOR;
 	if(__gnaw__at_end_of_string()) {
@@ -668,7 +676,7 @@ sub __gnaw__get_entire_string {
 sub __gnaw__delete_string_between_two_pointers {
 	GNAWMONITOR;
 	my ($start,$stop) = @_;
-
+	GNAWMONITOR("deleting string from $start to $stop");
 	my $this = $start;
 
 	if($this eq $__gnaw__head_element) {
@@ -1224,68 +1232,6 @@ sub __gnaw__check_all_coderefs {
 		}
 	}
 }
-
-=head2 match
-
-This is equivalent to the "m" part of a perl regexp of $string\=~m//.  The match function takes a grammar and attempts to find the first match within the string. If a match is found, the function returns true (1), else it returns false (0). The match function takes a series() of grammar components such as lit, set, quantifier, etc. The match function returns a coderef to the grammar. The "match" function should have no other grammar components outside of it. When calling the grammar, dereference the coderef returned by "match" and pass it the string you want to apply to the grammar.
-
-	# create the grammar
-	my $grammar = match(lit('hello'));
-	
-	# apply the grammar to a string
-	if($grammar->('hello world')) {
-		print "match\n";
-	} else {
-		print "no match";
-	}
-
-=cut
-
-sub match {
-	GNAWMONITOR;
-	__gnaw__check_all_coderefs(@_);
-	my (@coderefs)=@_;
-
-	my $status = {};
-	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
-	$status->{location} = $location;
-	$status->{descriptor} = 'match';
-
-	my $coderef;
-	my $ptrtocoderef=\$coderef;
-	$coderef = sub{
-		GNAWMONITOR('match');
-		my $string_to_match = shift(@_);
-		__gnaw__initialize_string_to_parse($string_to_match);
-
-		my $position;
-
-		# start at beginning of string and try to match
-		# if match fails, keep moving forward until we're
-		# at the end of the string.
-		until( __gnaw__at_end_of_string() ) {
-
-			__gnaw__initialize_call_tree();
-			__gnaw__handle_call_tree($ptrtocoderef, $status);
-
-			__gnaw__get_current_text_marker($position);
-
-			if(__gnaw__try_to_parse(series(@coderefs))) {
-				# DONE!
-				__gnaw__done();
-				return 1;
-			} else {
-				__gnaw__restore_old_text_marker($position);
-				__gnaw__move_pointer_forward();
-			}
-		}
-
-		return 0;
-	};
-	return $coderef;
-}
-
-
 =head2 series
 
 The "series" function is a gnaw grammar component which takes a series of other grammar components. This is the only way to define a grammar with one component occurring after another. The "series" function takes a series of other grammar components and returns a coderef to that portion of the grammar. 
@@ -2540,7 +2486,7 @@ sub __gnaw__execute_any_callbacks_at_this_call {
 	my $callback;
 
 	if(exists($command->{capture})) {
-		print "found capture on call tree\n";
+		GNAWMONITOR( "found capture on call tree\n" );
 		my $start_marker = $command->{start};
 		my $start_pointer = $start_marker->{pointer_to_text};
 
@@ -2601,6 +2547,28 @@ Note that "consumable" acts as an immediately executed code reference rather tha
 If the grammar later fails and part of the reason was because that consumable portion did not actually match, then the parser will not be able to retry the grammar from prior to the consumable portion. That portion is gone.
 
 When the single grammar command succeeds, the "consumable" function deletes the text currently matching that single grammar command and it deletes the portion of the call tree that corresponds to everything executed as part of that single grammar component.
+
+	my $captured=[];
+
+	my $callback = sub {
+		my $text = shift(@_);
+		push(@$captured, $text);
+	};
+
+	sub fruit {alternation(lit('apple'), lit('pear'), lit('peach'), lit('orange'))}
+	sub eatfruit {  consumable(capture( fruit , $callback)) }
+	$grammar = match( greedy(eatfruit, 's'));
+
+	ok( 1==$grammar->('peach apple pear orange potato'), "1.1 confirm match");
+
+	ok( ($captured->[0]) eq 'peach', "2.2, checking capture");
+	ok( ($captured->[1]) eq 'apple', "2.3, checking capture");
+	ok( ($captured->[2]) eq 'pear', "2.4, checking capture");
+	ok( ($captured->[3]) eq 'orange', "2.5, checking capture");
+
+When this finishes, the text left in memory would be ' potato'. If you are parsing a few lines of text, you may want to avoid "consumable" for its added complexity with no other noticable functionality. The "consumbable" function becomes a neccessity when parsing large blocks of text. It allow the parser to delete blocks of text that match the sub-command portion of the grammar.
+
+Remember, once text is consumed, it cannot be recovered.
 
 The "consumable" function returns a coderef that is used in part of a larger grammar.
 
@@ -2672,13 +2640,18 @@ sub __gnaw__consumable {
 	GNAWMONITOR(__gnaw__dump_current_call_tree() );
 	GNAWMONITOR("__gnaw__consumable about to delete consumable portion from calltree. ");
 
-	# if it passes, 
+	# if it passes,  
 	# call any callbacks between the current location and the start location
 	# delete each call as we go along
 	my $command = $__gnaw__current_calltree_location;
 
-	while(defined($command) and ($command ne $startcall) and ($command ne $__gnaw__call_tree) ) {
-		GNAWMONITOR("__gnaw__consumable doing callbacks for and then deleting this element");
+	my $startelement = $startcall->{pointer_to_tree};
+
+	GNAWMONITOR("__gnaw__consumable startelement is $startelement");
+	GNAWMONITOR("__gnaw__consumable current is $command");
+
+	while(defined($command) and ($command ne $startelement) and ($command ne $__gnaw__call_tree) ) {
+		GNAWMONITOR("__gnaw__consumable doing callbacks for and then deleting this element $command");
 		GNAWMONITOR("__gnaw__consumable descriptor: ".$command->{descriptor});
 		GNAWMONITOR("__gnaw__consumable location: ".$command->{location});
 
@@ -2703,6 +2676,10 @@ sub __gnaw__consumable {
 
 		%$command = ();
 		$command = $previous;
+
+		delete($previous->{next});
+
+		$__gnaw__current_calltree_location = $command;
 	}
 
 	GNAWMONITOR("__gnaw__consumable new call tree looks like this:");
@@ -2730,6 +2707,97 @@ sub __gnaw__consumable {
 
 }
 
+
+
+=head2 Outer Functions
+
+Outer functions are functions that must be the outermost command in the grammar. They return a codereference which contains the entire grammar. When executed, they generally receive a single parameter that is the string being operated on.
+
+=cut
+
+=head2 match
+
+This is equivalent to the "m" part of a perl regexp of $string\=~m//.  The match function takes a grammar and attempts to find the first match within the string. If a match is found, the function returns true (1), else it returns false (0). The match function takes a series() of grammar components such as lit, set, quantifier, etc. The match function returns a coderef to the grammar. The "match" function should have no other grammar components outside of it. When calling the grammar, dereference the coderef returned by "match" and pass it the string you want to apply to the grammar.
+
+	# create the grammar
+	my $grammar = match(lit('hello'));
+	
+	# apply the grammar to a string
+	if($grammar->('hello world')) {
+		print "match\n";
+	} else {
+		print "no match";
+	}
+
+=cut
+
+sub match {
+	GNAWMONITOR;
+	__gnaw__check_all_coderefs(@_);
+	my (@coderefs)=@_;
+
+	my $status = {};
+	my $location = __gnaw__find_location_of_this_subroutine_in_grammar();
+	$status->{location} = $location;
+	$status->{descriptor} = 'match';
+
+	my $coderef;
+	my $ptrtocoderef=\$coderef;
+	$coderef = sub{
+		GNAWMONITOR('match');
+		my $string_to_match = shift(@_);
+		__gnaw__initialize_string_to_parse($string_to_match);
+
+		my $position;
+
+		# start at beginning of string and try to match
+		# if match fails, keep moving forward until we're
+		# at the end of the string.
+		until( __gnaw__at_end_of_string() ) {
+
+			__gnaw__initialize_call_tree();
+			__gnaw__handle_call_tree($ptrtocoderef, $status);
+
+			__gnaw__get_current_text_marker($position);
+
+			if(__gnaw__try_to_parse(series(@coderefs))) {
+				# DONE!
+				__gnaw__done();
+				return 1;
+			} else {
+				__gnaw__restore_old_text_marker($position);
+				__gnaw__move_pointer_forward();
+			}
+		}
+
+		return 0;
+	};
+	return $coderef;
+}
+
+
+=head1 YET TO BE DEVELOPED
+
+This is a list of some other functionality that has not yet been fully developed but is on my list.
+
+The Gnaw module currently supports whitespace skipping. By default, skipping is turned on. Skipping can be disabled for the entire grammar. I am currently working on a clean interface to allow skipping to be turned on and off during the execution of a grammar. The problem is that Gnaw does a lot of "eval" calls and exception throwing in teh middle of subroutines. if an upper rule has skipping off, and a lower rule turns it on, but then throws an exception, not sure how to know what the "skip" setting should be set to when the exception is trapped. maybe make it a key/value pair that gets stored in the call tree.
+
+The Gnaw module should be easily convertable to parsing a file rather than a string passed in as a parameter during a subroutine call. By rewriting the functions __gnaw__at_end_of_string and/or __gnaw__move_pointer_forward, the Gnaw module should be able to transparently detect when it has reached the end of its internal buffer and read more text from the input file, and have all this be invisible to the user. If the user grammar can be written such that the "consumable" function prevents text from accumulating in memory, the Gnaw module should be able to parse an unlimited amount of text from a file by operating on an finite piece of it in RAM at any given moment.
+
+Likewise, the Gnaw module should also be fairly easily convertable to supporting a pre-processor. This would also be accomplished by rewriting the __gnaw__at_end_of_string and/or __gnaw__move_pointer_forward subroutines to take text from a file, and preprocess it for comments and for compiler directives, and place the final text into the linked list.
+
+Hopefully by the time I reach rev. 1.0, some basic form of these functions will be implemented so that users can see how it is done and so they can create their own preprocesors and so on.
+
+I need to implement a "replace" function. It would look a lot like "capture", in that it would take a grammar command and a callback. But during a match, it would call the callback, take whatever string it returned, and use that to replace the string it matched in the original text.
+
+I also need to implement some sort of text dumper subroutine. This would be called when the "consumable" function deletes text. Before it gets deleted, the consumable function would pass it to some subroutine, which could either ignore it and let it be deleted permanently from memory, or perhaps it writes the result in some file.  This would then allow the grammar to parse an infinite amount of text and modify portions of it.
+
+I also need some variations on the outer function "match", such as "parse" which would only parse from the beginning of the string. A "matchmany" function would go through the string and match as many times as it could, sort of like a "g" operator in perl regular expressions.
+
+Case insensitivity is currently not supported. not sure how important that is. Maybe add it as an option that can be passed in to the "literal" function as a second parameter. not sure how to apply it globally.
+
+
+=cut
 
 
 

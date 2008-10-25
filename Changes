@@ -115,5 +115,10 @@ section of the call tree, and delete the consumable text.
 Added a subroutine that dumps what's left of the string.
 
 
+0.11	24 October 2008
+
+The "consumable" function had a bug. It was deleting entire
+call stack. That appears to be fixed now.
+
 
 =====================================================================
