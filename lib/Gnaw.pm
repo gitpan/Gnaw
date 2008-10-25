@@ -9,13 +9,13 @@ Gnaw - Define parse grammars using perl subroutine calls. No intermediate gramma
 
 =head1 VERSION
 
-Version 0.11
+Version 0.12
 
 =cut
 
 { 
 package Gnaw;
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 # all the subroutines in Gnaw go into users namespace
 # however, cpan likes to see a package declaration.
@@ -2796,6 +2796,9 @@ I also need some variations on the outer function "match", such as "parse" which
 
 Case insensitivity is currently not supported. not sure how important that is. Maybe add it as an option that can be passed in to the "literal" function as a second parameter. not sure how to apply it globally.
 
+When "parse" function is working, it will need some sort of automatic error reporting and error recovery mode. Will need to keep track of different paths of rules (quantities, alternates, etc) and remember each path, and if overall failure occurs, print whichever path made it the furthest as the most likely error.
+
+will then also need some sort of error recovery so that we can keep parsing after one error.
 
 =cut
 

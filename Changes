@@ -120,5 +120,11 @@ Added a subroutine that dumps what's left of the string.
 The "consumable" function had a bug. It was deleting entire
 call stack. That appears to be fixed now.
 
+0.12	24 October 2008
+
+Added some example tests to test (t/) directory.
+Currently some multi-level alternations and series.
+All pass.
+
 
 =====================================================================

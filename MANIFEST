@@ -17,6 +17,9 @@ t/command_series.t
 t/command_set.t
 t/command_SET.t
 t/command_thing.t
+t/grammar_example_1.t
+t/grammar_example_2.t
+t/grammar_example_3.t
 t/pod-coverage.t
 t/pod.t
 META.yml                                 Module meta-data (added by MakeMaker)
